@@ -15,6 +15,7 @@ Run locally:
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 from pathlib import Path
@@ -37,6 +38,8 @@ COUNTRY_NAMES = {
     "IE": "Ireland",
     "NL": "Netherlands",
     "BE": "Belgium",
+    "SE": "Sweden",
+    "PL": "Poland",
 }
 
 # VAT on food supplements per marketplace (from "SQL calc measures general").
@@ -49,6 +52,8 @@ VAT_DEFAULTS = {
     "NL": 0.09,
     "BE": 0.06,
     "IE": 0.135,
+    "SE": 0.12,
+    "PL": 0.08,
 }
 
 EUR_TO_GBP_DEFAULT = 0.83  # COGS / ad spend are in EUR, GB prices in GBP
@@ -96,25 +101,104 @@ def require_login() -> None:
 
 
 # ---------- Data ----------
-@st.cache_data(show_spinner=False)
-def load_data() -> pd.DataFrame:
-    products = pd.read_csv(DATA_DIR / "products.csv")
-    spend = pd.read_csv(DATA_DIR / "marketing_spend.csv")
+COLUMN_RENAMES = {
+    "amazon-store": "country",
+    "product-name": "product_name",
+    "your-price": "current_price",
+    "estimated-referral-fee-per-unit": "referral_fee",
+    "estimated-variable-closing-fee": "closing_fee",
+    "expected-domestic-fulfilment-fee-per-unit": "fba_fee",
+    "COGS": "cogs_eur",
+    "cogs": "cogs_eur",
+}
+NUMERIC_COLS = ["current_price", "referral_fee", "closing_fee", "fba_fee", "cogs_eur"]
+REQUIRED_REPORT_COLS = {
+    "sku": "sku",
+    "country": "amazon-store",
+    "current_price": "your-price",
+    "referral_fee": "estimated-referral-fee-per-unit",
+    "fba_fee": "expected-domestic-fulfilment-fee-per-unit",
+}
 
-    products = products.rename(
-        columns={
-            "amazon-store": "country",
-            "product-name": "product_name",
-            "your-price": "current_price",
-            "estimated-referral-fee-per-unit": "referral_fee",
-            "estimated-variable-closing-fee": "closing_fee",
-            "expected-domestic-fulfilment-fee-per-unit": "fba_fee",
-            "COGS": "cogs_eur",
-        }
+
+def _to_num(series: pd.Series) -> pd.Series:
+    """Tolerant numeric parsing (handles '1,23' comma decimals and '--')."""
+    return pd.to_numeric(
+        series.astype(str).str.replace(",", ".", regex=False), errors="coerce"
     )
-    for col in ["current_price", "referral_fee", "closing_fee", "fba_fee", "cogs_eur"]:
-        products[col] = pd.to_numeric(products[col], errors="coerce")
 
+
+def _read_report(content: bytes, name: str) -> pd.DataFrame:
+    """Read an Amazon FBA fee preview export (.csv / .txt / .tsv / .xlsx)."""
+    if name.lower().endswith(".xlsx"):
+        return pd.read_excel(io.BytesIO(content))
+    for enc in ("utf-8-sig", "latin-1"):
+        try:
+            text = content.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    # sep=None sniffs the delimiter (Amazon ships tab-separated .txt files).
+    return pd.read_csv(io.StringIO(text), sep=None, engine="python")
+
+
+@st.cache_data(show_spinner=False)
+def load_data(report: bytes | None = None, report_name: str = "") -> tuple[pd.DataFrame, dict]:
+    """Build the pricing dataset; an uploaded fee report replaces the bundled one.
+
+    Returns (dataset, info). `info` describes the uploaded report merge
+    (rows, countries, COGS matches) and is empty for the bundled data.
+    """
+    bundled = pd.read_csv(DATA_DIR / "products.csv").rename(columns=COLUMN_RENAMES)
+    info: dict = {}
+
+    if report is None:
+        products = bundled
+    else:
+        raw = _read_report(report, report_name)
+        raw.columns = [str(c).strip().lower() for c in raw.columns]
+        raw = raw.rename(columns=COLUMN_RENAMES)
+        missing = [
+            orig for col, orig in REQUIRED_REPORT_COLS.items() if col not in raw.columns
+        ]
+        if missing:
+            raise ValueError(
+                "This doesn't look like an FBA fee preview report — missing "
+                f"column(s): {', '.join(missing)}. Export it from Seller Central → "
+                "Reports → Fulfilment by Amazon → Payments → Fee preview."
+            )
+        raw["country"] = raw["country"].astype(str).str.upper().replace({"UK": "GB"})
+        for col in ["product_name", "brand", "asin", "sales-price"]:
+            if col not in raw.columns:
+                raw[col] = ""
+        if "closing_fee" not in raw.columns:
+            raw["closing_fee"] = 0.0
+        if "currency" not in raw.columns:
+            raw["currency"] = raw["country"].map(
+                lambda c: "GBP" if c == "GB" else "EUR"
+            )
+        raw = raw.drop_duplicates(["country", "sku"], keep="first")
+
+        # The raw Amazon report has no COGS: take it from the report if present,
+        # otherwise carry it over from the bundled data (per SKU).
+        if "cogs_eur" not in raw.columns or _to_num(raw["cogs_eur"]).isna().all():
+            cogs_map = (
+                bundled.dropna(subset=["cogs_eur"])
+                .drop_duplicates("sku")
+                .set_index("sku")["cogs_eur"]
+            )
+            raw["cogs_eur"] = raw["sku"].map(cogs_map)
+        products = raw
+        info = {
+            "rows": len(products),
+            "countries": sorted(products["country"].unique()),
+            "cogs_missing": int(_to_num(products["cogs_eur"]).isna().sum()),
+        }
+
+    for col in NUMERIC_COLS:
+        products[col] = _to_num(products[col])
+
+    spend = pd.read_csv(DATA_DIR / "marketing_spend.csv")
     # Marketing export uses "UK" for the GB marketplace.
     spend["country"] = spend["country"].replace({"UK": "GB"})
     spend["spend_per_unit"] = pd.to_numeric(spend["spend_per_unit"], errors="coerce")
@@ -129,7 +213,30 @@ def load_data() -> pd.DataFrame:
     products["referral_rate"] = (
         products["referral_fee"] / products["current_price"]
     ).where(products["current_price"] > 0, 0.15)
-    return products
+    return products, info
+
+
+def products_csv_for_repo(df: pd.DataFrame) -> bytes:
+    """Serialize the dataset back to the data/products.csv schema."""
+    inverse = {
+        "country": "amazon-store",
+        "product_name": "product-name",
+        "current_price": "your-price",
+        "referral_fee": "estimated-referral-fee-per-unit",
+        "closing_fee": "estimated-variable-closing-fee",
+        "fba_fee": "expected-domestic-fulfilment-fee-per-unit",
+        "cogs_eur": "COGS",
+    }
+    cols = [
+        "sku", "asin", "country", "product_name", "brand", "current_price",
+        "sales-price", "currency", "referral_fee", "closing_fee", "fba_fee",
+        "cogs_eur",
+    ]
+    out = df.copy()
+    for c in cols:
+        if c not in out.columns:
+            out[c] = ""
+    return out[cols].rename(columns=inverse).to_csv(index=False).encode("utf-8")
 
 
 @st.cache_data(show_spinner=False)
@@ -188,9 +295,17 @@ require_login()
 
 st.title("💶 Product Pricer — Amazon")
 
-data = load_data()
-
 with st.sidebar:
+    st.header("Update data")
+    report_file = st.file_uploader(
+        "Current FBA fee preview report",
+        type=["csv", "txt", "tsv", "xlsx"],
+        help=(
+            "Seller Central → Reports → Fulfilment by Amazon → Fee preview. "
+            "Replaces prices and Amazon fees for this session; COGS is carried "
+            "over from the bundled data when the report has no COGS column."
+        ),
+    )
     st.header("Assumptions")
     cm2_target = st.number_input(
         "CM2 target (%)", 0.0, 100.0, CM2_TARGET_DEFAULT * 100, 0.5
@@ -213,7 +328,42 @@ with st.sidebar:
         "Spend per unit = total ad spend ÷ total units ordered in that window."
     )
 
-countries = sorted(data["country"].unique(), key=list(COUNTRY_NAMES).index)
+data = None
+if report_file is not None:
+    try:
+        data, report_info = load_data(report_file.getvalue(), report_file.name)
+    except Exception as exc:
+        st.sidebar.error(f"Could not read '{report_file.name}': {exc}")
+    else:
+        st.sidebar.success(
+            f"Using uploaded report **{report_file.name}**: "
+            f"{report_info['rows']} products in "
+            f"{', '.join(report_info['countries'])}."
+        )
+        if report_info["cogs_missing"]:
+            st.sidebar.warning(
+                f"{report_info['cogs_missing']} product(s) have no COGS match — "
+                "their margins show as empty."
+            )
+        st.sidebar.download_button(
+            "⬇️ Merged products.csv",
+            products_csv_for_repo(data),
+            file_name="products.csv",
+            mime="text/csv",
+            help=(
+                "The uploaded report combined with COGS. Commit this as "
+                "data/products.csv to make the update permanent — uploads only "
+                "last for the current session."
+            ),
+        )
+if data is None:
+    data, _ = load_data()
+
+_order = list(COUNTRY_NAMES)
+countries = sorted(
+    data["country"].unique(),
+    key=lambda c: (_order.index(c) if c in _order else len(_order), c),
+)
 tab_sheet, tab_calc = st.tabs(["📋 Country pricing sheet", "🧮 Product calculator"])
 
 

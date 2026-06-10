@@ -15,6 +15,13 @@ live. Modelled on the *"Margen Calc AMZ"* sheet of `Margin_Check_V5.xlsx`.
   "how much can I spend on ads/discounts and stay on target".
 - **Adjustable assumptions** (sidebar): CM2 / CM3 targets, VAT per country,
   EUR→GBP rate.
+- **FBA report upload** (sidebar → "Update data"): upload the current fee
+  preview report from Seller Central (`.csv`, `.txt`, `.tsv` or `.xlsx`;
+  tab/comma/semicolon separated and comma decimals are handled). It replaces
+  prices and Amazon fees for the session; COGS is carried over from the
+  bundled data per SKU when the report has no COGS column. A "Merged
+  products.csv" download is offered — commit it as `data/products.csv` to make
+  the update permanent (uploads only last for the browser session).
 
 ## Margin logic
 
