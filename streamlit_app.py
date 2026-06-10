@@ -888,31 +888,46 @@ with tab_calc:
 
     wrows = []
 
-    def _row(item, cur_eur, cur_pct, plan_pct, chip="", rc="", sub=False):
+    def _row(item, now_eur, now_pct, sc_eur, sc_pct, plan_pct, chip="", rc="", sub=False):
         cls = " class='sub'" if sub else ""
         wrows.append(
-            f"<tr{cls}><td>{item}</td><td>{cur_eur}</td><td>{cur_pct}</td>"
+            f"<tr{cls}><td>{item}</td><td>{now_eur}</td><td>{now_pct}</td>"
+            f"<td>{sc_eur}</td><td>{sc_pct}</td>"
             f"<td>{plan_pct}</td><td>{chip}</td>"
             f"<td class='pp-rc'>{rc}</td></tr>"
         )
 
-    _row("Price gross", _money(r["target_price"]), "—", "—")
-    _row("Price net", _money(net), "—", "—")
-    _row("− COGS", _money(-r["cogs"]), _p(cogs_pct), _p(cogs_t))
-    _row("CM1", _money(r["cm1"]), _p(sc["cm1"][1]), _p(cm1_t),
+    net_cur = r["net_cur"]
+
+    def _pc(v):
+        return _p(v / net_cur) if net_cur > 0 and pd.notna(v) else "—"
+
+    _row("Price gross", _money(r["current_price"]), "—",
+         _money(r["target_price"]), "—", "—")
+    _row("Price net", _money(net_cur), "—", _money(net), "—", "—")
+    _row("− COGS", _money(-r["cogs"]), _pc(r["cogs"]),
+         _money(-r["cogs"]), _p(cogs_pct), _p(cogs_t))
+    _row("CM1", _money(r["cm1_cur"]), _p(r["cm1_pct_cur"]),
+         _money(r["cm1"]), _p(sc["cm1"][1]), _p(cm1_t),
          _chip(f"{'↑' if gap1 >= 0 else '↓'} {gap1:+.1f}pp", _gap_tone(gap1)), rc1, sub=True)
-    _row("− FBA", _money(-r["fba_fee"]), _p(fba_pct), "—")
-    _row("− Referral fee", _money(-r["referral"]), _p(ref_pct), "—")
-    _row("CM2", _money(r["cm2"]), _p(sc["cm2"][1]), _p(calc_cm2_target),
+    _row("− FBA", _money(-r["fba_fee"]), _pc(r["fba_fee"]),
+         _money(-r["fba_fee"]), _p(fba_pct), "—")
+    _row("− Referral fee", _money(-r["referral_cur"]), _pc(r["referral_cur"]),
+         _money(-r["referral"]), _p(ref_pct), "—")
+    _row("CM2", _money(r["cm2_cur"]), _p(r["cm2_pct_cur"]),
+         _money(r["cm2"]), _p(sc["cm2"][1]), _p(calc_cm2_target),
          _chip(f"{'↑' if gap2 >= 0 else '↓'} {gap2:+.1f}pp", _gap_tone(gap2)), rc2, sub=True)
-    _row("− Ad spend *", _money(-r["marketing_per_unit"]), _p(ads_pct), _p(dc_t),
+    _row("− Ad spend *", _money(-r["marketing_per_unit"]), _pc(r["marketing_per_unit"]),
+         _money(-r["marketing_per_unit"]), _p(ads_pct), _p(dc_t),
          _chip("↑ below plan", "g") if ads_ok else _chip("↓ above plan", "r"), rc_ads)
-    _row("CM3", _money(r["cm3"]), _p(sc["cm3"][1]), _p(calc_cm3_target),
+    _row("CM3", _money(r["cm3_cur"]), _p(r["cm3_pct_cur"]),
+         _money(r["cm3"]), _p(sc["cm3"][1]), _p(calc_cm3_target),
          _chip(f"{'↑' if gap3 >= 0 else '↓'} {gap3:+.1f}pp", _gap_tone(gap3)), rc3, sub=True)
 
     st.markdown(
         "<div class='pp-head'>Cost waterfall — scenario vs plan</div>"
-        f"<table class='pp-tbl'><tr><th>Item</th><th>Scenario ({cur})</th>"
+        f"<table class='pp-tbl'><tr><th>Item</th><th>Current ({cur})</th>"
+        f"<th>Current %</th><th>Scenario ({cur})</th>"
         f"<th>Scenario %</th><th>Plan %</th>"
         f"<th>Δ vs plan</th><th>Root cause</th></tr>{''.join(wrows)}</table>",
         unsafe_allow_html=True,
