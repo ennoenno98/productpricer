@@ -15,6 +15,11 @@ live. Modelled on the *"Margen Calc AMZ"* sheet of `Margin_Check_V5.xlsx`.
   "how much can I spend on ads/discounts and stay on target".
 - **Adjustable assumptions** (sidebar): CM2 / CM3 targets, VAT per country,
   EUR→GBP rate.
+- **FBA fee changes tab** — after uploading a current fee preview report, this
+  tab compares it against the baseline in the repo and highlights products
+  whose FBA fulfilment fee went up (red) or down (green): summary counts, a
+  chart of the largest changes, a filterable detail table (including new and
+  disappeared products), and a CSV download. A fee change hits CM2/CM3 1:1.
 - **FBA report upload** (sidebar → "Update data"): upload the current fee
   preview report from Seller Central (`.csv`, `.txt`, `.tsv` or `.xlsx`;
   tab/comma/semicolon separated and comma decimals are handled). It replaces

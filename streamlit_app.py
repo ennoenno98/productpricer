@@ -329,6 +329,7 @@ with st.sidebar:
     )
 
 data = None
+report_info = None
 if report_file is not None:
     try:
         data, report_info = load_data(report_file.getvalue(), report_file.name)
@@ -364,7 +365,9 @@ countries = sorted(
     data["country"].unique(),
     key=lambda c: (_order.index(c) if c in _order else len(_order), c),
 )
-tab_sheet, tab_calc = st.tabs(["📋 Country pricing sheet", "🧮 Product calculator"])
+tab_sheet, tab_calc, tab_fees = st.tabs(
+    ["📋 Country pricing sheet", "🧮 Product calculator", "📦 FBA fee changes"]
+)
 
 
 # ===== Tab 1: per-country pricing sheet =====
@@ -624,6 +627,152 @@ with tab_calc:
         st.caption(
             f"Net price = costs + CM3 (green = profit, red = loss). "
             f"Ad spend per unit: Amazon Ads, {spend_period_label()}."
+        )
+
+# ===== Tab 3: FBA fee changes (uploaded report vs bundled baseline) =====
+with tab_fees:
+    if report_info is None:
+        st.info(
+            "Upload the **current FBA fee preview report** in the sidebar "
+            "(→ Update data) to compare its fees against the baseline bundled "
+            "in the repo (`data/products.csv`) and see which products got more "
+            "or less expensive to fulfil."
+        )
+    else:
+        baseline, _ = load_data()
+        old = baseline[
+            ["country", "sku", "product_name", "currency", "fba_fee", "current_price"]
+        ]
+        new = data[["country", "sku", "product_name", "currency", "fba_fee", "current_price"]]
+        cmp = old.merge(
+            new, on=["country", "sku"], how="outer",
+            suffixes=("_old", "_new"), indicator=True,
+        )
+        cmp["fba_delta"] = cmp["fba_fee_new"] - cmp["fba_fee_old"]
+        cmp["fba_delta_pct"] = (cmp["fba_delta"] / cmp["fba_fee_old"]).where(
+            cmp["fba_fee_old"] > 0
+        )
+
+        def _status(row):
+            if row["_merge"] == "right_only":
+                return "🆕 new product"
+            if row["_merge"] == "left_only":
+                return "❌ not in report"
+            if pd.isna(row["fba_delta"]) or abs(row["fba_delta"]) < 0.005:
+                return "➖ unchanged"
+            return "🔺 increase" if row["fba_delta"] > 0 else "🔻 decrease"
+
+        cmp["status"] = cmp.apply(_status, axis=1)
+        changed = cmp[cmp["status"].isin(["🔺 increase", "🔻 decrease"])]
+
+        f1, f2, f3, f4, f5 = st.columns(5)
+        f1.metric("Compared", int((cmp["_merge"] == "both").sum()))
+        f2.metric("Fee increases", int((cmp["status"] == "🔺 increase").sum()))
+        f3.metric("Fee decreases", int((cmp["status"] == "🔻 decrease").sum()))
+        avg_delta = changed["fba_delta"].mean()
+        f4.metric(
+            "Avg change (changed only)",
+            f"{avg_delta:+.2f}" if pd.notna(avg_delta) else "—",
+        )
+        f5.metric(
+            "New / missing",
+            f"{int((cmp['_merge'] == 'right_only').sum())} / "
+            f"{int((cmp['_merge'] == 'left_only').sum())}",
+        )
+
+        g1, g2 = st.columns([1, 2])
+        with g1:
+            fee_countries = st.multiselect(
+                "Countries",
+                sorted(cmp["country"].unique()),
+                default=sorted(cmp["country"].unique()),
+                key="fee_countries",
+            )
+        with g2:
+            only_changes = st.checkbox(
+                "Show only changes (hide unchanged)", value=True, key="fee_only_changes"
+            )
+
+        view = cmp[cmp["country"].isin(fee_countries)]
+        if only_changes:
+            view = view[view["status"] != "➖ unchanged"]
+        view = view.sort_values("fba_delta", key=lambda s: s.abs(), ascending=False)
+
+        if changed.empty:
+            st.success("No FBA fee changes between the uploaded report and the baseline.")
+        else:
+            top = changed.reindex(
+                changed["fba_delta"].abs().sort_values(ascending=False).index
+            ).head(12)
+            fig = go.Figure(
+                go.Bar(
+                    y=(top["sku"] + " (" + top["country"] + ")")[::-1],
+                    x=top["fba_delta"][::-1],
+                    orientation="h",
+                    marker_color=[
+                        "#C00000" if v > 0 else "#70AD47" for v in top["fba_delta"][::-1]
+                    ],
+                    text=[f"{v:+.2f}" for v in top["fba_delta"][::-1]],
+                    textposition="outside",
+                )
+            )
+            fig.update_layout(
+                title="Largest FBA fee changes (per unit)",
+                height=max(260, 36 * len(top) + 80),
+                margin={"t": 50, "b": 10, "l": 10, "r": 40},
+                xaxis={"title": None},
+            )
+            st.plotly_chart(fig, width="stretch")
+
+        show_fees = view[
+            [
+                "country", "sku", "status", "product_name_new", "fba_fee_old",
+                "fba_fee_new", "fba_delta", "fba_delta_pct", "current_price_old",
+                "current_price_new",
+            ]
+        ].copy()
+        show_fees["product_name_new"] = show_fees["product_name_new"].fillna(
+            view["product_name_old"]
+        )
+
+        def _delta_color(v):
+            if pd.isna(v) or abs(v) < 0.005:
+                return ""
+            return "background-color: #FBDBD7" if v > 0 else "background-color: #DEEDD3"
+
+        st.dataframe(
+            show_fees.style.map(_delta_color, subset=["fba_delta", "fba_delta_pct"]),
+            hide_index=True,
+            width="stretch",
+            height=520,
+            column_config={
+                "country": st.column_config.TextColumn("Country", width="small"),
+                "sku": st.column_config.TextColumn("SKU", width="small"),
+                "status": st.column_config.TextColumn("Status", width="small"),
+                "product_name_new": st.column_config.TextColumn("Product", width="large"),
+                "fba_fee_old": st.column_config.NumberColumn("FBA fee (baseline)", format="%.2f"),
+                "fba_fee_new": st.column_config.NumberColumn("FBA fee (report)", format="%.2f"),
+                "fba_delta": st.column_config.NumberColumn(
+                    "Δ FBA fee",
+                    format="%+.2f",
+                    help="Per unit, in the marketplace currency. Hits CM2 and CM3 1:1.",
+                ),
+                "fba_delta_pct": st.column_config.NumberColumn("Δ %", format="percent"),
+                "current_price_old": st.column_config.NumberColumn("Price (baseline)", format="%.2f"),
+                "current_price_new": st.column_config.NumberColumn("Price (report)", format="%.2f"),
+            },
+        )
+        st.caption(
+            "Baseline: `data/products.csv` in the repo. Fees are per unit in the "
+            "marketplace currency; a fee increase reduces CM2 and CM3 by the same "
+            "amount. Download the merged products.csv in the sidebar and commit it "
+            "to make the uploaded report the new baseline."
+        )
+        st.download_button(
+            "⬇️ Download fee comparison (CSV)",
+            show_fees.to_csv(index=False).encode("utf-8"),
+            file_name="fba_fee_changes.csv",
+            mime="text/csv",
         )
 
 st.caption(
