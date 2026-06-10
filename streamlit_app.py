@@ -15,6 +15,7 @@ Run locally:
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -131,6 +132,23 @@ def load_data() -> pd.DataFrame:
     return products
 
 
+@st.cache_data(show_spinner=False)
+def load_metadata() -> dict:
+    try:
+        return json.loads((DATA_DIR / "metadata.json").read_text())
+    except Exception:
+        return {}
+
+
+def spend_period_label() -> str:
+    meta = load_metadata().get("marketing_spend", {})
+    window = meta.get("window", "unknown period")
+    start, end = meta.get("period_start"), meta.get("period_end")
+    if start and end:
+        return f"{window} ({start} → {end})"
+    return window
+
+
 def localize_costs(df: pd.DataFrame, eur_to_gbp: float) -> pd.DataFrame:
     """COGS and ad spend are in EUR; convert to GBP for the GB marketplace."""
     df = df.copy()
@@ -186,6 +204,13 @@ with st.sidebar:
     st.caption(
         "VAT per country can be adjusted below. Defaults are the food-supplement "
         "rates from the margin workbook."
+    )
+    st.header("Data basis")
+    _meta = load_metadata().get("marketing_spend", {})
+    st.markdown(
+        f"**Ad spend per unit:** {_meta.get('source', 'Amazon Ads exports')}, "
+        f"**{spend_period_label()}**. "
+        "Spend per unit = total ad spend ÷ total units ordered in that window."
     )
 
 countries = sorted(data["country"].unique(), key=list(COUNTRY_NAMES).index)
@@ -274,8 +299,16 @@ with tab_sheet:
             "cm1_pct": st.column_config.NumberColumn("CM1 %", format="percent"),
             "cm2": st.column_config.NumberColumn(f"CM2 ({cur})", format="%.2f"),
             "cm2_pct": st.column_config.NumberColumn("CM2 %", format="percent"),
-            "cm3": st.column_config.NumberColumn(f"CM3 ({cur})", format="%.2f"),
-            "cm3_pct": st.column_config.NumberColumn("CM3 %", format="percent"),
+            "cm3": st.column_config.NumberColumn(
+                f"CM3 ({cur})",
+                format="%.2f",
+                help=f"After ad spend per unit — Amazon Ads, {spend_period_label()}",
+            ),
+            "cm3_pct": st.column_config.NumberColumn(
+                "CM3 %",
+                format="percent",
+                help=f"After ad spend per unit — Amazon Ads, {spend_period_label()}",
+            ),
             "cm3_delta": st.column_config.NumberColumn("Δ CM3", format="%+.2f"),
         },
     )
@@ -357,7 +390,7 @@ with tab_calc:
         ("− Amazon FBA fulfilment", -r["fba_fee"], None, -r["fba_fee"], None),
         ("− Amazon referral fee", -r["referral"], None, -r["referral_cur"], None),
         ("CM2", r["cm2"], r["cm2_pct"], r["cm2_cur"], r["cm2_pct_cur"]),
-        ("− Marketing spend / unit", -r["marketing_per_unit"], None, -r["marketing_per_unit"], None),
+        ("− Ad spend / unit *", -r["marketing_per_unit"], None, -r["marketing_per_unit"], None),
         ("CM3", r["cm3"], r["cm3_pct"], r["cm3_cur"], r["cm3_pct_cur"]),
     ]
     table = pd.DataFrame(
@@ -370,6 +403,15 @@ with tab_calc:
         }
     )
 
+    k1, k2, k3 = st.columns(3)
+    for col, label in ((k1, "cm1"), (k2, "cm2"), (k3, "cm3")):
+        pct = r[f"{label}_pct"] * 100 if pd.notna(r[f"{label}_pct"]) else float("nan")
+        col.metric(
+            label.upper(),
+            f"{cur}{r[label]:.2f}  ·  {pct:.1f}%",
+            delta=f"{r[label] - r[f'{label}_cur']:+.2f} vs current",
+        )
+
     t1, t2 = st.columns([1.2, 1])
     with t1:
         st.dataframe(
@@ -381,6 +423,7 @@ with tab_calc:
                 f"Current ({cur})": st.column_config.NumberColumn(format="%.2f"),
             },
         )
+        st.caption(f"\\* Amazon Ads spend ÷ units ordered, {spend_period_label()}.")
         max_ads = r["cm2"] - cm3_target * r["net"]
         st.info(
             f"**Headroom to CM3 target ({cm3_target * 100:.1f}%):** at this price you "
@@ -391,29 +434,51 @@ with tab_calc:
             st.error(f"CM2 ({r['cm2_pct'] * 100:.1f}%) is below the {cm2_target * 100:.0f}% target.")
 
     with t2:
-        fig = go.Figure(
-            go.Waterfall(
-                orientation="v",
-                measure=["absolute", "relative", "total", "relative", "relative", "total", "relative", "total"],
-                x=["Net price", "COGS", "CM1", "FBA", "Referral", "CM2", "Marketing", "CM3"],
-                y=[r["net"], -r["cogs"], 0, -r["fba_fee"], -r["referral"], 0, -r["marketing_per_unit"], 0],
-                text=[f"{v:.2f}" for v in [r["net"], -r["cogs"], r["cm1"], -r["fba_fee"], -r["referral"], r["cm2"], -r["marketing_per_unit"], r["cm3"]]],
-                textposition="outside",
-                decreasing={"marker": {"color": "#C0504D"}},
-                increasing={"marker": {"color": "#1F3864"}},
-                totals={"marker": {"color": "#4472C4"}},
+        # Where the net price goes: cost stack vs what's left, current vs target.
+        segments = [
+            ("COGS", "#8496B0", [r["cogs"], r["cogs"]]),
+            ("FBA", "#B4C7E7", [r["fba_fee"], r["fba_fee"]]),
+            ("Referral", "#D6DCE5", [r["referral_cur"], r["referral"]]),
+            ("Ad spend", "#F4B183", [r["marketing_per_unit"], r["marketing_per_unit"]]),
+            ("CM3", None, [r["cm3_cur"], r["cm3"]]),
+        ]
+        scenarios = ["Current", "Target"]
+        fig = go.Figure()
+        for name, color, values in segments:
+            colors = (
+                ["#70AD47" if v >= 0 else "#C00000" for v in values]
+                if name == "CM3"
+                else color
             )
-        )
+            fig.add_bar(
+                y=scenarios,
+                x=values,
+                name=name,
+                orientation="h",
+                marker_color=colors,
+                text=[f"{v:.2f}" for v in values],
+                textposition="inside",
+                insidetextanchor="middle",
+                textangle=0,
+            )
         fig.update_layout(
-            title=f"Margin waterfall at {cur}{target_price:.2f}",
-            showlegend=False,
-            height=420,
-            margin={"t": 50, "b": 20},
+            barmode="relative",
+            title=f"Net price breakdown ({cur}/unit)",
+            height=280,
+            margin={"t": 50, "b": 10, "l": 10, "r": 10},
+            legend={"orientation": "h", "y": -0.15},
+            xaxis={"title": None},
+            yaxis={"title": None, "categoryorder": "array", "categoryarray": ["Target", "Current"]},
         )
         st.plotly_chart(fig, width="stretch")
+        st.caption(
+            f"Net price = costs + CM3 (green = profit, red = loss). "
+            f"Ad spend per unit: Amazon Ads, {spend_period_label()}."
+        )
 
 st.caption(
-    "CM1 = net price − COGS · CM2 = CM1 − FBA − referral fee · CM3 = CM2 − ad spend per unit. "
+    "CM1 = net price − COGS · CM2 = CM1 − FBA − referral fee · CM3 = CM2 − ad spend per unit "
+    f"(Amazon Ads, {spend_period_label()}). "
     "Referral fees are recalculated from the simulated price (rate derived from Amazon's fee "
     "preview); FBA fees and ad spend per unit are held constant. Margins are % of net price."
 )

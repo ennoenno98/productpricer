@@ -43,6 +43,14 @@ the sidebar (default 0.83).
 |---|---|---|
 | `data/products.csv` | Amazon **FBA fee preview report** + COGS (workbook sheet "AMZ Fees") | `python extract_from_excel.py Margin_Check.xlsx`, or export the fee preview from Seller Central and append the COGS column |
 | `data/marketing_spend.csv` | Amazon Ads spend ÷ units ordered per SKU × country (workbook sheet "AMZ Marketing data") | same script |
+| `data/metadata.json` | Ad-spend period (window + export date), written by the script | same script |
+
+**Marketing spend period:** the PPC exports in the workbook are
+**trailing-90-day** Amazon Ads reports pulled on **2026-03-09** (i.e. roughly
+2025-12-09 → 2026-03-09). The window is inferred from the export file names
+(e.g. `UK PPC 90 days.csv`) and the export date from the files' "Date
+modified"; both are stored in `data/metadata.json` and shown in the dashboard
+(sidebar "Data basis", CM3 column tooltips, and chart/table captions).
 
 SKUs with no ads data get marketing spend of 0 (same as the Excel lookup).
 The marketing export's "UK" is mapped to the fee report's "GB".
