@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -302,6 +303,35 @@ def spend_period_label() -> str:
     return window
 
 
+@st.cache_data(show_spinner=False)
+def load_elasticity() -> pd.DataFrame | None:
+    try:
+        return pd.read_csv(DATA_DIR / "elasticity.csv")
+    except Exception:
+        return None
+
+
+def attach_elasticity(df: pd.DataFrame) -> pd.DataFrame:
+    """Merge per-SKU everyday elasticity; country default where not estimated."""
+    df = df.copy()
+    el = load_elasticity()
+    if el is None:
+        df["elasticity"] = np.nan
+        df["elasticity_method"] = "none"
+        return df
+    sku_level = el[el["sku"] != "_default"][["country", "sku", "elasticity"]]
+    defaults = (
+        el[el["sku"] == "_default"].set_index("country")["elasticity"].to_dict()
+    )
+    overall = float(np.median(list(defaults.values()))) if defaults else -3.0
+    df = df.merge(sku_level, on=["country", "sku"], how="left")
+    df["elasticity_method"] = np.where(df["elasticity"].notna(), "estimated", "country-default")
+    df["elasticity"] = df["elasticity"].fillna(
+        df["country"].map(defaults).fillna(overall)
+    )
+    return df
+
+
 def localize_costs(df: pd.DataFrame, eur_to_gbp: float) -> pd.DataFrame:
     """COGS and ad spend are in EUR; convert to GBP for the GB marketplace."""
     df = df.copy()
@@ -385,6 +415,17 @@ with st.sidebar:
     eur_to_gbp = st.number_input(
         "EUR → GBP rate (GB COGS / ad spend)", 0.5, 1.5, EUR_TO_GBP_DEFAULT, 0.01
     )
+    use_elasticity = st.checkbox(
+        "Model volume response to price changes",
+        value=load_elasticity() is not None,
+        disabled=load_elasticity() is None,
+        help=(
+            "Everyday price elasticity per SKU, estimated from 12 months of "
+            "daily sales with promo days, ad spend and seasonality controlled "
+            "(see README). Volume in the profit-impact columns then scales as "
+            "(new price / current price)^elasticity instead of staying constant."
+        ),
+    )
     st.header("Data basis")
     _meta = load_metadata().get("marketing_spend", {})
     st.markdown(
@@ -460,7 +501,7 @@ with tab_sheet:
         "Margin cells are green at/above target, red below."
     )
 
-    cdf = localize_costs(data[data["country"] == country], eur_to_gbp)
+    cdf = attach_elasticity(localize_costs(data[data["country"] == country], eur_to_gbp))
     cur = CURRENCY_SYMBOL.get(cdf["currency"].iloc[0], "€")
 
     missing_cogs = cdf["cogs"].isna().sum()
@@ -485,10 +526,19 @@ with tab_sheet:
         labels=["🔴 below CM3 target", "🟡 ok", "🟢 above CM2 target"],
     )
 
-    # Volume-weighted impact: units sold in the ad-spend window, volume held
-    # constant (no price-elasticity assumption).
-    base["profit_delta"] = (base["cm3"] - base["cm3_cur"]) * base["units_window"]
-    base["cm3_total"] = base["cm3"] * base["units_window"]
+    # Volume-weighted impact: units sold in the ad-spend window. With the
+    # elasticity toggle on, volume scales as (new/current price)^elasticity.
+    if use_elasticity:
+        ratio = (base["new_price"] / base["current_price"]).where(
+            base["current_price"] > 0, 1.0
+        )
+        base["units_new"] = base["units_window"] * ratio ** base["elasticity"]
+    else:
+        base["units_new"] = base["units_window"]
+    base["profit_delta"] = (
+        base["cm3"] * base["units_new"] - base["cm3_cur"] * base["units_window"]
+    )
+    base["cm3_total"] = base["cm3"] * base["units_new"]
 
     n_changed = int((base["price_change"].abs() > 0.004).sum())
     m1, m2, m3, m4, m5 = st.columns(5)
@@ -514,7 +564,8 @@ with tab_sheet:
         [
             "sku", "product_name", "status", "current_price", "new_price",
             "price_change", "cm1", "cm1_pct", "cm2", "cm2_pct",
-            "cm3", "cm3_pct", "cm3_delta", "units_window", "profit_delta",
+            "cm3", "cm3_pct", "cm3_delta", "units_window", "elasticity",
+            "profit_delta",
         ]
     ].reset_index(drop=True)
 
@@ -577,12 +628,23 @@ with tab_sheet:
                 format="%d",
                 help=f"Units ordered in the ad-spend window ({spend_period_label()}), from Novadata",
             ),
+            "elasticity": st.column_config.NumberColumn(
+                "Elasticity",
+                format="%.1f",
+                help=(
+                    "Everyday price elasticity (12m daily sales, promo days / "
+                    "ads / seasonality controlled). −2 means +1% price ≈ −2% "
+                    "volume. SKUs without their own estimate use the country "
+                    "average."
+                ),
+            ),
             "profit_delta": st.column_config.NumberColumn(
                 f"Δ CM3 € total",
                 format="%+.0f",
                 help=(
-                    "Change in total CM3 at the sold volume if the new price "
-                    "had applied — volume held constant (no elasticity)"
+                    "Change in total CM3 vs current prices at the window's "
+                    "sold volume — with the elasticity toggle on, volume "
+                    "scales with the price change; otherwise held constant"
                 ),
             ),
         },
@@ -621,7 +683,9 @@ with tab_calc:
             format_func=lambda c: f"{COUNTRY_NAMES.get(c, c)} ({c})",
             key="calc_country",
         )
-    ccdf = localize_costs(data[data["country"] == calc_country], eur_to_gbp)
+    ccdf = attach_elasticity(
+        localize_costs(data[data["country"] == calc_country], eur_to_gbp)
+    )
     cur = CURRENCY_SYMBOL.get(ccdf["currency"].iloc[0], "€")
     with c2:
         prod_label = st.selectbox(
@@ -703,6 +767,18 @@ with tab_calc:
             label.upper(),
             f"{cur}{r[label]:.2f}  ·  {pct:.1f}%",
             delta=f"{r[label] - r[f'{label}_cur']:+.2f} vs current",
+        )
+
+    if use_elasticity and pd.notna(r.get("elasticity")) and row["current_price"] > 0:
+        _ratio = target_price / row["current_price"]
+        _vol = _ratio ** r["elasticity"]
+        _units0 = float(row.get("units_window", 0) or 0)
+        _delta_total = r["cm3"] * _units0 * _vol - r["cm3_cur"] * _units0
+        st.info(
+            f"**Volume response:** elasticity {r['elasticity']:.2f} "
+            f"({row['elasticity_method']}) → price {_ratio - 1:+.1%} ⇒ volume "
+            f"{_vol - 1:+.1%}. At the {_units0:.0f} units sold in the ad-spend "
+            f"window, total CM3 changes by **{cur}{_delta_total:+,.0f}**."
         )
 
     t1, t2 = st.columns([1.2, 1])

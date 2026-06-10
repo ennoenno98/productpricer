@@ -13,10 +13,31 @@ live. Modelled on the *"Margen Calc AMZ"* sheet of `Margin_Check_V5.xlsx`.
 - **Product calculator** — single-product deep dive: target price or discount,
   full margin breakdown (the Excel calculator's layout), waterfall chart, and
   "how much can I spend on ads/discounts and stay on target".
-- **Volume-weighted profit impact** — the pricing sheet shows units sold per
-  SKU (Novadata, ad-spend window) and the total CM3 € change a price edit
-  would produce at that volume, per product and summed for the country
-  (volume held constant; price elasticity is not modelled).
+- **Volume-weighted profit impact with price elasticity** — the pricing sheet
+  shows units sold per SKU (Novadata, ad-spend window) and the total CM3 €
+  change a price edit would produce at that volume. With the sidebar toggle
+  on (default), volume scales as `(new price / current price)^elasticity`
+  using each SKU's estimated everyday elasticity; toggled off, volume is held
+  constant. The calculator shows the projected volume response per product.
+
+## Price elasticity (`data/elasticity.csv`)
+
+`estimate_elasticity.py` estimates everyday price elasticity per SKU ×
+marketplace from 12 months of daily Novadata sales: log-log OLS of units on
+implied price with controls for **promo days**, ad spend, month and weekday.
+Promo days come from the Seller Central promotions report
+(`extract_promotions.py` → `data/promotions.csv`; ASINs recovered from the
+report's HYPERLINK formulas, marketplaces attributed by matching promo prices
+to the daily implied price) plus inferred price dips (≤93% of the rolling
+median). Separating promo days matters: raw elasticities run ≈ −4 median, but
+everyday elasticity — the right number for permanent price changes — is
+≈ −1.5 to −4 by country (829 SKU-series estimated). Estimates are shrunk
+toward the country's trimmed mean (precision-weighted) and clipped to
+[−9, −0.3]; SKUs without their own estimate use the country default.
+
+Re-run after major assortment/price changes:
+`python estimate_elasticity.py` (downloads the Novadata export) — or pass
+`--from-file <export.csv.gz>`.
 - **Country-specific plan targets** — CM2 and channel-margin (CM3) targets per
   marketplace come from the AP26 plan ("Amazon Margins" tab), including
   seasonal monthly CM3 targets selectable in the sidebar (`data/targets.json`,
