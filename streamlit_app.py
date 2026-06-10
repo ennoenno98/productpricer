@@ -131,6 +131,20 @@ def _to_num(series: pd.Series) -> pd.Series:
     )
 
 
+def fee_snapshot_files() -> list[Path]:
+    """Committed FBA fee report versions, oldest -> newest (dated filenames)."""
+    return sorted((DATA_DIR / "fee_history").glob("products_*.csv"))
+
+
+@st.cache_data(show_spinner=False)
+def load_snapshot(path_str: str) -> pd.DataFrame:
+    df = pd.read_csv(path_str).rename(columns=COLUMN_RENAMES)
+    for col in NUMERIC_COLS:
+        if col in df.columns:
+            df[col] = _to_num(df[col])
+    return df
+
+
 def _read_report(content: bytes, name: str) -> pd.DataFrame:
     """Read an Amazon FBA fee preview export (.csv / .txt / .tsv / .xlsx)."""
     if name.lower().endswith(".xlsx"):
@@ -146,13 +160,18 @@ def _read_report(content: bytes, name: str) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def load_data(report: bytes | None = None, report_name: str = "") -> tuple[pd.DataFrame, dict]:
-    """Build the pricing dataset; an uploaded fee report replaces the bundled one.
+def load_data(
+    report: bytes | None = None, report_name: str = "", snapshot: str = ""
+) -> tuple[pd.DataFrame, dict]:
+    """Build the pricing dataset; an uploaded fee report replaces the committed one.
 
-    Returns (dataset, info). `info` describes the uploaded report merge
-    (rows, countries, COGS matches) and is empty for the bundled data.
+    `snapshot` is the latest fee_history filename (cache key + baseline source;
+    falls back to data/products.csv when no snapshots exist). Returns
+    (dataset, info); `info` describes the uploaded report merge and is empty
+    for committed data.
     """
-    bundled = pd.read_csv(DATA_DIR / "products.csv").rename(columns=COLUMN_RENAMES)
+    base_path = DATA_DIR / "fee_history" / snapshot if snapshot else DATA_DIR / "products.csv"
+    bundled = pd.read_csv(base_path).rename(columns=COLUMN_RENAMES)
     info: dict = {}
 
     if report is None:
@@ -370,11 +389,16 @@ with st.sidebar:
         "Spend per unit = total ad spend ÷ total units ordered in that window."
     )
 
+_snaps = fee_snapshot_files()
+_latest_snap = _snaps[-1].name if _snaps else ""
+
 data = None
 report_info = None
 if report_file is not None:
     try:
-        data, report_info = load_data(report_file.getvalue(), report_file.name)
+        data, report_info = load_data(
+            report_file.getvalue(), report_file.name, _latest_snap
+        )
     except Exception as exc:
         st.sidebar.error(f"Could not read '{report_file.name}': {exc}")
     else:
@@ -388,19 +412,21 @@ if report_file is not None:
                 f"{report_info['cogs_missing']} product(s) have no COGS match — "
                 "their margins show as empty."
             )
+        _today = pd.Timestamp.today().date().isoformat()
         st.sidebar.download_button(
-            "⬇️ Merged products.csv",
+            "⬇️ Merged snapshot CSV",
             products_csv_for_repo(data),
-            file_name="products.csv",
+            file_name=f"products_{_today}.csv",
             mime="text/csv",
             help=(
-                "The uploaded report combined with COGS. Commit this as "
-                "data/products.csv to make the update permanent — uploads only "
-                "last for the current session."
+                "The uploaded report combined with COGS. Commit this file into "
+                "data/fee_history/ to make it the new baseline (uploads only "
+                "last for the current session). The FBA fee changes tab always "
+                "compares the two newest files in that folder."
             ),
         )
 if data is None:
-    data, _ = load_data()
+    data, _ = load_data(snapshot=_latest_snap)
 
 _order = list(COUNTRY_NAMES)
 countries = sorted(
@@ -426,7 +452,8 @@ with tab_sheet:
         f"VAT {vat * 100:.1f}% (fixed) · plan targets for "
         f"{COUNTRY_NAMES.get(country, country)}: CM2 ≥ {cm2_target * 100:.1f}%, "
         f"CM3 ≥ {cm3_target * 100:.1f}% "
-        f"({target_month if plan_month else 'full year'}, AP26)."
+        f"({target_month if plan_month else 'full year'}, AP26). "
+        "Margin cells are green at/above target, red below."
     )
 
     cdf = localize_costs(data[data["country"] == country], eur_to_gbp)
@@ -473,8 +500,29 @@ with tab_sheet:
         ]
     ].reset_index(drop=True)
 
+    # Color-code margins vs the country's plan targets (green >= target).
+    _plan_all = load_targets()["cm1_target"]
+    cm1_target = _plan_all.get(country, sum(_plan_all.values()) / len(_plan_all))
+
+    def _vs_target(target: float):
+        def _color(v):
+            if pd.isna(v):
+                return ""
+            return (
+                "background-color: #DEEDD3" if v >= target
+                else "background-color: #FBDBD7"
+            )
+        return _color
+
+    styled = (
+        show.style
+        .map(_vs_target(cm1_target), subset=["cm1_pct"])
+        .map(_vs_target(cm2_target), subset=["cm2_pct"])
+        .map(_vs_target(cm3_target), subset=["cm3_pct"])
+    )
+
     edited = st.data_editor(
-        show,
+        styled,
         key=f"editor_{country}",
         width="stretch",
         height=560,
@@ -693,21 +741,41 @@ with tab_calc:
             f"Ad spend per unit: Amazon Ads, {spend_period_label()}."
         )
 
-# ===== Tab 3: FBA fee changes (uploaded report vs bundled baseline) =====
+# ===== Tab 3: FBA fee changes (current vs previous fee report version) =====
 with tab_fees:
-    if report_info is None:
+    snaps = fee_snapshot_files()
+    pair = None  # (old_df, new_df, old_label, new_label)
+    if report_info is not None and snaps:
+        pair = (
+            load_snapshot(str(snaps[-1])),
+            data,
+            f"`{snaps[-1].name}` (committed baseline)",
+            f"uploaded report `{report_file.name}` "
+            f"({pd.Timestamp.today().date().isoformat()})",
+        )
+    elif len(snaps) >= 2:
+        pair = (
+            load_snapshot(str(snaps[-2])),
+            load_snapshot(str(snaps[-1])),
+            f"`{snaps[-2].name}` (previous version)",
+            f"`{snaps[-1].name}` (current version)",
+        )
+
+    if pair is None:
         st.info(
-            "Upload the **current FBA fee preview report** in the sidebar "
-            "(→ Update data) to compare its fees against the baseline bundled "
-            "in the repo (`data/products.csv`) and see which products got more "
-            "or less expensive to fulfil."
+            "Only one fee report version is on file "
+            f"(`{snaps[-1].name if snaps else 'data/products.csv'}`). "
+            "Upload the current FBA fee preview report in the sidebar "
+            "(→ Update data), or commit a second dated snapshot to "
+            "`data/fee_history/`, to see FBA fee changes here."
         )
     else:
-        baseline, _ = load_data()
-        old = baseline[
+        old_full, new_full, old_label, new_label = pair
+        st.markdown(f"**Comparing:** {new_label} **vs** {old_label}")
+        old = old_full[
             ["country", "sku", "product_name", "currency", "fba_fee", "current_price"]
         ]
-        new = data[["country", "sku", "product_name", "currency", "fba_fee", "current_price"]]
+        new = new_full[["country", "sku", "product_name", "currency", "fba_fee", "current_price"]]
         cmp = old.merge(
             new, on=["country", "sku"], how="outer",
             suffixes=("_old", "_new"), indicator=True,
@@ -827,10 +895,10 @@ with tab_fees:
             },
         )
         st.caption(
-            "Baseline: `data/products.csv` in the repo. Fees are per unit in the "
-            "marketplace currency; a fee increase reduces CM2 and CM3 by the same "
-            "amount. Download the merged products.csv in the sidebar and commit it "
-            "to make the uploaded report the new baseline."
+            f"Comparing {new_label} against {old_label}. Fees are per unit in "
+            "the marketplace currency; a fee increase reduces CM2 and CM3 by "
+            "the same amount. To record a new version, upload the report and "
+            "commit the merged snapshot from the sidebar into `data/fee_history/`."
         )
         st.download_button(
             "⬇️ Download fee comparison (CSV)",

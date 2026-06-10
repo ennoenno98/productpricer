@@ -20,11 +20,16 @@ live. Modelled on the *"Margen Calc AMZ"* sheet of `Margin_Check_V5.xlsx`.
   the plan (e.g. BE) fall back to the plan average. VAT is **fixed per
   country** (food-supplement rates), not a user input.
 - **Adjustable assumptions** (sidebar): EUR→GBP rate.
-- **FBA fee changes tab** — after uploading a current fee preview report, this
-  tab compares it against the baseline in the repo and highlights products
+- **FBA fee changes tab** — always compares the two newest fee report versions
+  in `data/fee_history/` (dated snapshots; the versions being compared are
+  named in the tab). When a report is uploaded in the sidebar, the comparison
+  switches to *uploaded report vs committed baseline*. Highlights products
   whose FBA fulfilment fee went up (red) or down (green): summary counts, a
   chart of the largest changes, a filterable detail table (including new and
   disappeared products), and a CSV download. A fee change hits CM2/CM3 1:1.
+- **Margins color-coded vs country targets** — in the pricing sheet, the
+  CM1/CM2/CM3 % cells are green at/above the country's AP26 plan target and
+  red below it.
 - **FBA report upload** (sidebar → "Update data"): upload the current fee
   preview report from Seller Central (`.csv`, `.txt`, `.tsv` or `.xlsx`;
   tab/comma/semicolon separated and comma decimals are handled). It replaces
@@ -58,19 +63,20 @@ the sidebar (default 0.83).
 
 | File | Source | Refresh |
 |---|---|---|
-| `data/products.csv` | Amazon **FBA fee preview report** + COGS (workbook sheet "AMZ Fees") | `python extract_from_excel.py Margin_Check.xlsx`, or export the fee preview from Seller Central and append the COGS column |
-| `data/marketing_spend.csv` | Amazon Ads spend ÷ units ordered per SKU × country (workbook sheet "AMZ Marketing data") | same script |
-| `data/metadata.json` | Ad-spend period (window + export date), written by the script | same script |
+| `data/fee_history/products_*.csv` | Amazon **FBA fee preview report** + COGS, one dated snapshot per version; the newest is the live dataset | **manual**: upload the report in the dashboard, download the merged snapshot, commit it into `data/fee_history/` |
+| `data/products.csv` | initial baseline (workbook sheet "AMZ Fees"), fallback when `fee_history/` is empty | `python extract_from_excel.py Margin_Check.xlsx` |
+| `data/marketing_spend.csv` | **Novadata daily margin export** (Amazon Ads spend ÷ units ordered, trailing 90 days, per SKU × marketplace) | **automatic**: daily GitHub Actions workflow `update_marketing_spend.yml` (07:00 UTC) commits the refresh; Render auto-deploys |
+| `data/metadata.json` | Ad-spend period (window + export dates) | written by the update workflow |
+| `data/targets.json` | Country margin targets from the AP26 plan | `python extract_targets.py AP26_….xlsx` |
 
-**Marketing spend period:** the PPC exports in the workbook are
-**trailing-90-day** Amazon Ads reports pulled on **2026-03-09** (i.e. roughly
-2025-12-09 → 2026-03-09). The window is inferred from the export file names
-(e.g. `UK PPC 90 days.csv`) and the export date from the files' "Date
-modified"; both are stored in `data/metadata.json` and shown in the dashboard
-(sidebar "Data basis", CM3 column tooltips, and chart/table captions).
+**Update model:** ad spend and sales units refresh automatically every day
+from the same Novadata export the Margin-Analytics dashboard uses. The only
+manual update is the **FBA fee report** (which also carries prices); COGS and
+plan targets change rarely and have extract scripts.
 
+The ad-spend window and export date are stored in `data/metadata.json` and
+shown in the dashboard (sidebar "Data basis", CM3 column tooltips, captions).
 SKUs with no ads data get marketing spend of 0 (same as the Excel lookup).
-The marketing export's "UK" is mapped to the fee report's "GB".
 
 ## Run locally
 
