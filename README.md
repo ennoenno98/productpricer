@@ -13,8 +13,13 @@ live. Modelled on the *"Margen Calc AMZ"* sheet of `Margin_Check_V5.xlsx`.
 - **Product calculator** — single-product deep dive: target price or discount,
   full margin breakdown (the Excel calculator's layout), waterfall chart, and
   "how much can I spend on ads/discounts and stay on target".
-- **Adjustable assumptions** (sidebar): CM2 / CM3 targets, VAT per country,
-  EUR→GBP rate.
+- **Country-specific plan targets** — CM2 and channel-margin (CM3) targets per
+  marketplace come from the AP26 plan ("Amazon Margins" tab), including
+  seasonal monthly CM3 targets selectable in the sidebar (`data/targets.json`,
+  regenerated with `python extract_targets.py AP26_….xlsx`). Countries not in
+  the plan (e.g. BE) fall back to the plan average. VAT is **fixed per
+  country** (food-supplement rates), not a user input.
+- **Adjustable assumptions** (sidebar): EUR→GBP rate.
 - **FBA fee changes tab** — after uploading a current fee preview report, this
   tab compares it against the baseline in the repo and highlights products
   whose FBA fulfilment fee went up (red) or down (green): summary counts, a

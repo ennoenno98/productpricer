@@ -42,8 +42,9 @@ COUNTRY_NAMES = {
     "PL": "Poland",
 }
 
-# VAT on food supplements per marketplace (from "SQL calc measures general").
-VAT_DEFAULTS = {
+# VAT on food supplements per marketplace (fixed, from the margin workbook's
+# "SQL calc measures general" sheet — not a user input).
+VAT_RATES = {
     "DE": 0.07,
     "GB": 0.20,
     "FR": 0.055,
@@ -57,8 +58,10 @@ VAT_DEFAULTS = {
 }
 
 EUR_TO_GBP_DEFAULT = 0.83  # COGS / ad spend are in EUR, GB prices in GBP
-CM2_TARGET_DEFAULT = 0.35  # "marge2_target" from the workbook
-CM3_TARGET_DEFAULT = 0.197  # CM3 target used in "Margen Calc AMZ"
+MONTHS = [
+    "January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December",
+]
 
 CURRENCY_SYMBOL = {"GBP": "£", "EUR": "€"}
 
@@ -247,6 +250,26 @@ def load_metadata() -> dict:
         return {}
 
 
+@st.cache_data(show_spinner=False)
+def load_targets() -> dict:
+    """Country margin targets from the AP26 plan (see extract_targets.py)."""
+    return json.loads((DATA_DIR / "targets.json").read_text())
+
+
+def country_targets(country: str, month: str | None = None) -> tuple[float, float]:
+    """(CM2 target, CM3 target) for a country from the AP26 plan.
+
+    `month` selects the seasonal CM3 target; None means the full-year target.
+    Countries not in the plan (e.g. BE) fall back to the plan average.
+    """
+    t = load_targets()
+    cm2_map = t["cm2_target"]
+    cm3_map = t["cm3_target_monthly"].get(month, t["cm3_target"]) if month else t["cm3_target"]
+    cm2 = cm2_map.get(country, sum(cm2_map.values()) / len(cm2_map))
+    cm3 = cm3_map.get(country, sum(cm3_map.values()) / len(cm3_map))
+    return cm2, cm3
+
+
 def spend_period_label() -> str:
     meta = load_metadata().get("marketing_spend", {})
     window = meta.get("window", "unknown period")
@@ -306,19 +329,38 @@ with st.sidebar:
             "over from the bundled data when the report has no COGS column."
         ),
     )
+    st.header("Plan targets (AP26)")
+    target_month = st.selectbox(
+        "CM3 target month",
+        ["Full year"] + MONTHS,
+        key="plan_month_select",
+        help=(
+            "The AP26 plan sets seasonal channel-margin targets (demand-capture "
+            "spend varies by month). 'Full year' uses the annual target."
+        ),
+    )
+    plan_month = None if target_month == "Full year" else target_month
+    _t = load_targets()
+    with st.expander("Country targets & VAT"):
+        _ref = pd.DataFrame(
+            {
+                "CM2": _t["cm2_target"],
+                "CM3": (
+                    _t["cm3_target_monthly"].get(plan_month, _t["cm3_target"])
+                    if plan_month else _t["cm3_target"]
+                ),
+                "VAT": {c: VAT_RATES[c] for c in _t["cm2_target"]},
+            }
+        )
+        st.dataframe(
+            _ref.style.format("{:.1%}"),
+            width="stretch",
+            column_config={"_index": st.column_config.TextColumn("Country")},
+        )
+        st.caption(f"Source: {_t['source']}. VAT is fixed per country.")
     st.header("Assumptions")
-    cm2_target = st.number_input(
-        "CM2 target (%)", 0.0, 100.0, CM2_TARGET_DEFAULT * 100, 0.5
-    ) / 100
-    cm3_target = st.number_input(
-        "CM3 target (%)", 0.0, 100.0, CM3_TARGET_DEFAULT * 100, 0.5
-    ) / 100
     eur_to_gbp = st.number_input(
         "EUR → GBP rate (GB COGS / ad spend)", 0.5, 1.5, EUR_TO_GBP_DEFAULT, 0.01
-    )
-    st.caption(
-        "VAT per country can be adjusted below. Defaults are the food-supplement "
-        "rates from the margin workbook."
     )
     st.header("Data basis")
     _meta = load_metadata().get("marketing_spend", {})
@@ -372,19 +414,20 @@ tab_sheet, tab_calc, tab_fees = st.tabs(
 
 # ===== Tab 1: per-country pricing sheet =====
 with tab_sheet:
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        country = st.selectbox(
-            "Country",
-            countries,
-            format_func=lambda c: f"{COUNTRY_NAMES.get(c, c)} ({c})",
-            key="sheet_country",
-        )
-    vat_default = VAT_DEFAULTS.get(country, 0.20)
-    with col_b:
-        vat = st.number_input(
-            "VAT (%)", 0.0, 30.0, vat_default * 100, 0.5, key=f"vat_{country}"
-        ) / 100
+    country = st.selectbox(
+        "Country",
+        countries,
+        format_func=lambda c: f"{COUNTRY_NAMES.get(c, c)} ({c})",
+        key="sheet_country",
+    )
+    vat = VAT_RATES.get(country, 0.20)
+    cm2_target, cm3_target = country_targets(country, plan_month)
+    st.caption(
+        f"VAT {vat * 100:.1f}% (fixed) · plan targets for "
+        f"{COUNTRY_NAMES.get(country, country)}: CM2 ≥ {cm2_target * 100:.1f}%, "
+        f"CM3 ≥ {cm3_target * 100:.1f}% "
+        f"({target_month if plan_month else 'full year'}, AP26)."
+    )
 
     cdf = localize_costs(data[data["country"] == country], eur_to_gbp)
     cur = CURRENCY_SYMBOL.get(cdf["currency"].iloc[0], "€")
@@ -510,10 +553,15 @@ with tab_calc:
     sku = prod_label.split(" — ")[0]
     row = ccdf[ccdf["sku"] == sku].iloc[0]
 
-    vat = st.number_input(
-        "VAT (%)", 0.0, 30.0, VAT_DEFAULTS.get(calc_country, 0.20) * 100, 0.5,
-        key=f"calc_vat_{calc_country}",
-    ) / 100
+    vat = VAT_RATES.get(calc_country, 0.20)
+    calc_cm2_target, calc_cm3_target = country_targets(calc_country, plan_month)
+    plan = load_targets()
+    st.caption(
+        f"VAT {vat * 100:.1f}% (fixed) · plan targets for "
+        f"{COUNTRY_NAMES.get(calc_country, calc_country)}: CM2 ≥ "
+        f"{calc_cm2_target * 100:.1f}%, CM3 ≥ {calc_cm3_target * 100:.1f}% "
+        f"({target_month if plan_month else 'full year'}, AP26)."
+    )
 
     i1, i2 = st.columns(2)
     with i1:
@@ -535,24 +583,37 @@ with tab_calc:
     one = compute_margins(one, "target_price", vat, "")
     r = one.iloc[0]
 
+    _plan_c = calc_country if calc_country in plan["cm2_target"] else None
+    plan_pct = {
+        "cogs": -plan["cogs_target"].get(_plan_c) if _plan_c else None,
+        "cm1": plan["cm1_target"].get(_plan_c) if _plan_c else None,
+        "cm2": calc_cm2_target,
+        "ads": -plan["demand_capture_target"].get(_plan_c) if _plan_c else None,
+        "cm3": calc_cm3_target,
+    }
     lines = [
-        ("Price gross", r["target_price"], None, r["current_price"], None),
-        ("Price net", r["net"], None, r["net_cur"], None),
-        ("− Product cost (COGS)", -r["cogs"], None, -r["cogs"], None),
-        ("CM1", r["cm1"], r["cm1_pct"], r["cm1_cur"], r["cm1_pct_cur"]),
-        ("− Amazon FBA fulfilment", -r["fba_fee"], None, -r["fba_fee"], None),
-        ("− Amazon referral fee", -r["referral"], None, -r["referral_cur"], None),
-        ("CM2", r["cm2"], r["cm2_pct"], r["cm2_cur"], r["cm2_pct_cur"]),
-        ("− Ad spend / unit *", -r["marketing_per_unit"], None, -r["marketing_per_unit"], None),
-        ("CM3", r["cm3"], r["cm3_pct"], r["cm3_cur"], r["cm3_pct_cur"]),
+        ("Price gross", r["target_price"], None, r["current_price"], None, None),
+        ("Price net", r["net"], None, r["net_cur"], None, None),
+        ("− Product cost (COGS)", -r["cogs"], None, -r["cogs"], None, plan_pct["cogs"]),
+        ("CM1", r["cm1"], r["cm1_pct"], r["cm1_cur"], r["cm1_pct_cur"], plan_pct["cm1"]),
+        ("− Amazon FBA fulfilment", -r["fba_fee"], None, -r["fba_fee"], None, None),
+        ("− Amazon referral fee", -r["referral"], None, -r["referral_cur"], None, None),
+        ("CM2", r["cm2"], r["cm2_pct"], r["cm2_cur"], r["cm2_pct_cur"], plan_pct["cm2"]),
+        ("− Ad spend / unit *", -r["marketing_per_unit"], None, -r["marketing_per_unit"], None, plan_pct["ads"]),
+        ("CM3", r["cm3"], r["cm3_pct"], r["cm3_cur"], r["cm3_pct_cur"], plan_pct["cm3"]),
     ]
+
+    def _pct(v):
+        return f"{v * 100:.1f}%" if v is not None and pd.notna(v) else ""
+
     table = pd.DataFrame(
         {
             "Item": [l[0] for l in lines],
             f"Target ({cur})": [l[1] for l in lines],
-            "Target %": [f"{l[2] * 100:.1f}%" if l[2] is not None and pd.notna(l[2]) else "" for l in lines],
+            "Target %": [_pct(l[2]) for l in lines],
             f"Current ({cur})": [l[3] for l in lines],
-            "Current %": [f"{l[4] * 100:.1f}%" if l[4] is not None and pd.notna(l[4]) else "" for l in lines],
+            "Current %": [_pct(l[4]) for l in lines],
+            "Plan %": [_pct(l[5]) for l in lines],
         }
     )
 
@@ -577,14 +638,17 @@ with tab_calc:
             },
         )
         st.caption(f"\\* Amazon Ads spend ÷ units ordered, {spend_period_label()}.")
-        max_ads = r["cm2"] - cm3_target * r["net"]
+        max_ads = r["cm2"] - calc_cm3_target * r["net"]
         st.info(
-            f"**Headroom to CM3 target ({cm3_target * 100:.1f}%):** at this price you "
+            f"**Headroom to CM3 target ({calc_cm3_target * 100:.1f}%):** at this price you "
             f"can spend up to **{cur}{max(max_ads, 0):.2f}** per unit "
             f"({max(max_ads / r['net'], 0) * 100:.1f}% of net) on ads + discounts."
         )
-        if pd.notna(r["cm2_pct"]) and r["cm2_pct"] < cm2_target:
-            st.error(f"CM2 ({r['cm2_pct'] * 100:.1f}%) is below the {cm2_target * 100:.0f}% target.")
+        if pd.notna(r["cm2_pct"]) and r["cm2_pct"] < calc_cm2_target:
+            st.error(
+                f"CM2 ({r['cm2_pct'] * 100:.1f}%) is below the country's plan "
+                f"target of {calc_cm2_target * 100:.1f}%."
+            )
 
     with t2:
         # Where the net price goes: cost stack vs what's left, current vs target.
@@ -779,5 +843,7 @@ st.caption(
     "CM1 = net price − COGS · CM2 = CM1 − FBA − referral fee · CM3 = CM2 − ad spend per unit "
     f"(Amazon Ads, {spend_period_label()}). "
     "Referral fees are recalculated from the simulated price (rate derived from Amazon's fee "
-    "preview); FBA fees and ad spend per unit are held constant. Margins are % of net price."
+    "preview); FBA fees and ad spend per unit are held constant. Margins are % of net price. "
+    "VAT is fixed per country; margin targets are country-specific from the AP26 plan "
+    "('Amazon Margins' tab)."
 )
