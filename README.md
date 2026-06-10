@@ -13,6 +13,10 @@ live. Modelled on the *"Margen Calc AMZ"* sheet of `Margin_Check_V5.xlsx`.
 - **Product calculator** — single-product deep dive: target price or discount,
   full margin breakdown (the Excel calculator's layout), waterfall chart, and
   "how much can I spend on ads/discounts and stay on target".
+- **Volume-weighted profit impact** — the pricing sheet shows units sold per
+  SKU (Novadata, ad-spend window) and the total CM3 € change a price edit
+  would produce at that volume, per product and summed for the country
+  (volume held constant; price elasticity is not modelled).
 - **Country-specific plan targets** — CM2 and channel-margin (CM3) targets per
   marketplace come from the AP26 plan ("Amazon Margins" tab), including
   seasonal monthly CM3 targets selectable in the sidebar (`data/targets.json`,

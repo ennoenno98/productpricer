@@ -224,11 +224,15 @@ def load_data(
     # Marketing export uses "UK" for the GB marketplace.
     spend["country"] = spend["country"].replace({"UK": "GB"})
     spend["spend_per_unit"] = pd.to_numeric(spend["spend_per_unit"], errors="coerce")
+    spend["units_ordered"] = pd.to_numeric(spend["units_ordered"], errors="coerce")
     products = products.merge(
-        spend[["country", "sku", "spend_per_unit"]], on=["country", "sku"], how="left"
+        spend[["country", "sku", "spend_per_unit", "units_ordered"]],
+        on=["country", "sku"], how="left",
     )
     # No ads recorded for the SKU -> 0, matching the XLOOKUP(...,0) in Excel.
     products["spend_per_unit_eur"] = products["spend_per_unit"].fillna(0.0)
+    # Units sold in the ad-spend window (Novadata), for volume-weighted impact.
+    products["units_window"] = products["units_ordered"].fillna(0.0)
 
     # Referral fee scales with price: derive the rate from Amazon's estimate
     # at the current price so it can be re-applied to any simulated price.
@@ -481,8 +485,13 @@ with tab_sheet:
         labels=["🔴 below CM3 target", "🟡 ok", "🟢 above CM2 target"],
     )
 
+    # Volume-weighted impact: units sold in the ad-spend window, volume held
+    # constant (no price-elasticity assumption).
+    base["profit_delta"] = (base["cm3"] - base["cm3_cur"]) * base["units_window"]
+    base["cm3_total"] = base["cm3"] * base["units_window"]
+
     n_changed = int((base["price_change"].abs() > 0.004).sum())
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Products", len(base))
     m2.metric("Prices changed", n_changed)
     m3.metric(
@@ -491,12 +500,21 @@ with tab_sheet:
         delta=f"{(base['cm3_pct'].mean() - base['cm3_pct_cur'].mean()) * 100:+.1f} pp",
     )
     m4.metric("Below CM3 target", int((base["cm3_pct"] < cm3_target).sum()))
+    m5.metric(
+        "Δ CM3 € at sold volume",
+        f"{cur}{base['profit_delta'].sum():+,.0f}",
+        help=(
+            f"Change in total CM3 vs current prices, at the units sold in the "
+            f"ad-spend window ({spend_period_label()}). Assumes volume stays "
+            "constant — price elasticity is not modelled."
+        ),
+    )
 
     show = base[
         [
             "sku", "product_name", "status", "current_price", "new_price",
             "price_change", "cm1", "cm1_pct", "cm2", "cm2_pct",
-            "cm3", "cm3_pct", "cm3_delta",
+            "cm3", "cm3_pct", "cm3_delta", "units_window", "profit_delta",
         ]
     ].reset_index(drop=True)
 
@@ -554,6 +572,19 @@ with tab_sheet:
                 help=f"After ad spend per unit — Amazon Ads, {spend_period_label()}",
             ),
             "cm3_delta": st.column_config.NumberColumn("Δ CM3", format="%+.2f"),
+            "units_window": st.column_config.NumberColumn(
+                "Units sold",
+                format="%d",
+                help=f"Units ordered in the ad-spend window ({spend_period_label()}), from Novadata",
+            ),
+            "profit_delta": st.column_config.NumberColumn(
+                f"Δ CM3 € total",
+                format="%+.0f",
+                help=(
+                    "Change in total CM3 at the sold volume if the new price "
+                    "had applied — volume held constant (no elasticity)"
+                ),
+            ),
         },
     )
 
