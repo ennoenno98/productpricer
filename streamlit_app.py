@@ -673,9 +673,53 @@ with tab_sheet:
         )
 
 
-# ===== Tab 2: single-product calculator (mirrors "Margen Calc AMZ") =====
+# ===== Tab 2: single-product calculator (scenario vs plan) =====
+CALC_CSS = """
+<style>
+.pp-head { color:#6b7280; font-size:0.72rem; letter-spacing:0.08em;
+  text-transform:uppercase; font-weight:600; margin:0.8rem 0 0.4rem 0; }
+.pp-cards { display:flex; gap:12px; margin:0.2rem 0 0.6rem 0; }
+.pp-card { flex:1; border:1px solid #e5e7eb; border-radius:12px;
+  padding:12px 14px; background:#fff; }
+.pp-card .lbl { display:flex; justify-content:space-between;
+  color:#6b7280; font-size:0.78rem; font-weight:600; }
+.pp-card .val { font-size:1.6rem; font-weight:700; margin:2px 0; }
+.pp-chip { display:inline-block; border-radius:999px; padding:1px 9px;
+  font-size:0.72rem; font-weight:600; white-space:nowrap; }
+.pp-g { background:#e6f4ea; color:#137333; }
+.pp-a { background:#fef7e0; color:#b06000; }
+.pp-r { background:#fce8e6; color:#c5221f; }
+.pp-bar { height:5px; border-radius:3px; background:#f1f3f4;
+  margin-top:8px; overflow:hidden; }
+.pp-bar div { height:100%; border-radius:3px; }
+.pp-tbl { width:100%; border-collapse:collapse; font-size:0.85rem; }
+.pp-tbl th { color:#6b7280; font-size:0.7rem; letter-spacing:0.06em;
+  text-transform:uppercase; text-align:right; font-weight:600;
+  padding:6px 10px; border-bottom:1px solid #e5e7eb; }
+.pp-tbl th:first-child, .pp-tbl td:first-child { text-align:left; }
+.pp-tbl th:last-child, .pp-tbl td:last-child { text-align:left; }
+.pp-tbl td { padding:7px 10px; border-bottom:1px solid #f3f4f6;
+  text-align:right; color:#374151; }
+.pp-tbl tr.sub td { background:#f7f9fc; font-weight:700; color:#111827; }
+.pp-rc { color:#6b7280; font-size:0.78rem; }
+.pp-rc b { color:#374151; }
+</style>
+"""
+
+
+def _chip(text: str, tone: str) -> str:
+    return f"<span class='pp-chip pp-{tone}'>{text}</span>"
+
+
+def _gap_tone(gap_pp: float) -> str:
+    if gap_pp >= -3:
+        return "g" if gap_pp >= 0 else "g"
+    return "a" if gap_pp >= -10 else "r"
+
+
 with tab_calc:
-    c1, c2 = st.columns([1, 3])
+    st.markdown(CALC_CSS, unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1.1, 2.6, 1.6])
     with c1:
         calc_country = st.selectbox(
             "Country",
@@ -699,24 +743,36 @@ with tab_calc:
     vat = VAT_RATES.get(calc_country, 0.20)
     calc_cm2_target, calc_cm3_target = country_targets(calc_country, plan_month)
     plan = load_targets()
-    st.caption(
-        f"VAT {vat * 100:.1f}% (fixed) · plan targets for "
-        f"{COUNTRY_NAMES.get(calc_country, calc_country)}: CM2 ≥ "
-        f"{calc_cm2_target * 100:.1f}%, CM3 ≥ {calc_cm3_target * 100:.1f}% "
-        f"({target_month if plan_month else 'full year'}, AP26)."
+    _plan_c = calc_country if calc_country in plan["cm2_target"] else None
+    cm1_t = plan["cm1_target"].get(_plan_c, 0.71) if _plan_c else 0.71
+    cogs_t = plan["cogs_target"].get(_plan_c, 0.29) if _plan_c else 0.29
+    dc_t = (
+        plan["demand_capture_target"].get(_plan_c)
+        if _plan_c else max(calc_cm2_target - calc_cm3_target, 0.0)
     )
+    with c3:
+        st.markdown(
+            f"<div style='text-align:right; color:#6b7280; font-size:0.78rem; "
+            f"padding-top:1.9rem;'>VAT {vat * 100:.1f}% · CM2 ≥ "
+            f"{calc_cm2_target * 100:.1f}% · CM3 ≥ {calc_cm3_target * 100:.1f}%"
+            f"<br>{target_month if plan_month else 'full year'} · AP26</div>",
+            unsafe_allow_html=True,
+        )
 
+    st.markdown("<div class='pp-head'>Pricing scenario — edit to simulate</div>", unsafe_allow_html=True)
     i1, i2 = st.columns(2)
     with i1:
         target_price = st.number_input(
             f"Target price gross ({cur})",
             0.0, 500.0, float(row["current_price"]), 0.1,
         )
+        st.caption(f"Current price: {cur}{row['current_price']:.2f}")
     with i2:
         discount = st.number_input(
             "Target discount on current price (%)", 0.0, 90.0, 0.0, 1.0,
             help="Used only if the target price equals the current price.",
         )
+        st.caption("Synced with price above")
     if abs(target_price - row["current_price"]) < 0.004 and discount > 0:
         target_price = row["current_price"] * (1 - discount / 100)
 
@@ -726,127 +782,177 @@ with tab_calc:
     one = compute_margins(one, "target_price", vat, "")
     r = one.iloc[0]
 
-    _plan_c = calc_country if calc_country in plan["cm2_target"] else None
-    plan_pct = {
-        "cogs": -plan["cogs_target"].get(_plan_c) if _plan_c else None,
-        "cm1": plan["cm1_target"].get(_plan_c) if _plan_c else None,
-        "cm2": calc_cm2_target,
-        "ads": -plan["demand_capture_target"].get(_plan_c) if _plan_c else None,
-        "cm3": calc_cm3_target,
+    net = r["net"]
+    sc = {
+        "cm1": (r["cm1"], r["cm1_pct"], cm1_t),
+        "cm2": (r["cm2"], r["cm2_pct"], calc_cm2_target),
+        "cm3": (r["cm3"], r["cm3_pct"], calc_cm3_target),
     }
-    lines = [
-        ("Price gross", r["target_price"], None, r["current_price"], None, None),
-        ("Price net", r["net"], None, r["net_cur"], None, None),
-        ("− Product cost (COGS)", -r["cogs"], None, -r["cogs"], None, plan_pct["cogs"]),
-        ("CM1", r["cm1"], r["cm1_pct"], r["cm1_cur"], r["cm1_pct_cur"], plan_pct["cm1"]),
-        ("− Amazon FBA fulfilment", -r["fba_fee"], None, -r["fba_fee"], None, None),
-        ("− Amazon referral fee", -r["referral"], None, -r["referral_cur"], None, None),
-        ("CM2", r["cm2"], r["cm2_pct"], r["cm2_cur"], r["cm2_pct_cur"], plan_pct["cm2"]),
-        ("− Ad spend / unit *", -r["marketing_per_unit"], None, -r["marketing_per_unit"], None, plan_pct["ads"]),
-        ("CM3", r["cm3"], r["cm3_pct"], r["cm3_cur"], r["cm3_pct_cur"], plan_pct["cm3"]),
-    ]
 
-    def _pct(v):
-        return f"{v * 100:.1f}%" if v is not None and pd.notna(v) else ""
-
-    table = pd.DataFrame(
-        {
-            "Item": [l[0] for l in lines],
-            f"Target ({cur})": [l[1] for l in lines],
-            "Target %": [_pct(l[2]) for l in lines],
-            f"Current ({cur})": [l[3] for l in lines],
-            "Current %": [_pct(l[4]) for l in lines],
-            "Plan %": [_pct(l[5]) for l in lines],
-        }
-    )
-
-    k1, k2, k3 = st.columns(3)
-    for col, label in ((k1, "cm1"), (k2, "cm2"), (k3, "cm3")):
-        pct = r[f"{label}_pct"] * 100 if pd.notna(r[f"{label}_pct"]) else float("nan")
-        col.metric(
-            label.upper(),
-            f"{cur}{r[label]:.2f}  ·  {pct:.1f}%",
-            delta=f"{r[label] - r[f'{label}_cur']:+.2f} vs current",
+    cards = []
+    for name, (val, pct, tgt) in sc.items():
+        pct = float(pct) if pd.notna(pct) else float("nan")
+        gap_pp = (pct - tgt) * 100
+        tone = _gap_tone(gap_pp)
+        color = {"g": "#137333", "a": "#b06000", "r": "#c5221f"}[tone]
+        bar = {"g": "#34a853", "a": "#fbbc04", "r": "#ea4335"}[tone]
+        width = max(min(pct / tgt, 1.0), 0.0) * 100 if tgt > 0 and pd.notna(pct) else 0
+        cards.append(
+            f"<div class='pp-card'><div class='lbl'><span>{name.upper()}</span>"
+            f"<span>plan ≥{tgt * 100:.1f}%</span></div>"
+            f"<div class='val' style='color:{color}'>{pct * 100:.1f}%"
+            f" &nbsp;{_chip(f'{gap_pp:+.1f}pp', tone)}</div>"
+            f"<div class='pp-bar'><div style='width:{width:.0f}%;"
+            f"background:{bar}'></div></div></div>"
         )
+    st.markdown(f"<div class='pp-cards'>{''.join(cards)}</div>", unsafe_allow_html=True)
 
     if use_elasticity and pd.notna(r.get("elasticity")) and row["current_price"] > 0:
         _ratio = target_price / row["current_price"]
         _vol = _ratio ** r["elasticity"]
         _units0 = float(row.get("units_window", 0) or 0)
         _delta_total = r["cm3"] * _units0 * _vol - r["cm3_cur"] * _units0
-        st.info(
-            f"**Volume response:** elasticity {r['elasticity']:.2f} "
-            f"({row['elasticity_method']}) → price {_ratio - 1:+.1%} ⇒ volume "
-            f"{_vol - 1:+.1%}. At the {_units0:.0f} units sold in the ad-spend "
-            f"window, total CM3 changes by **{cur}{_delta_total:+,.0f}**."
-        )
-
-    t1, t2 = st.columns([1.2, 1])
-    with t1:
-        st.dataframe(
-            table,
-            hide_index=True,
-            width="stretch",
-            column_config={
-                f"Target ({cur})": st.column_config.NumberColumn(format="%.2f"),
-                f"Current ({cur})": st.column_config.NumberColumn(format="%.2f"),
-            },
-        )
-        st.caption(f"\\* Amazon Ads spend ÷ units ordered, {spend_period_label()}.")
-        max_ads = r["cm2"] - calc_cm3_target * r["net"]
-        st.info(
-            f"**Headroom to CM3 target ({calc_cm3_target * 100:.1f}%):** at this price you "
-            f"can spend up to **{cur}{max(max_ads, 0):.2f}** per unit "
-            f"({max(max_ads / r['net'], 0) * 100:.1f}% of net) on ads + discounts."
-        )
-        if pd.notna(r["cm2_pct"]) and r["cm2_pct"] < calc_cm2_target:
-            st.error(
-                f"CM2 ({r['cm2_pct'] * 100:.1f}%) is below the country's plan "
-                f"target of {calc_cm2_target * 100:.1f}%."
-            )
-
-    with t2:
-        # Where the net price goes: cost stack vs what's left, current vs target.
-        segments = [
-            ("COGS", "#8496B0", [r["cogs"], r["cogs"]]),
-            ("FBA", "#B4C7E7", [r["fba_fee"], r["fba_fee"]]),
-            ("Referral", "#D6DCE5", [r["referral_cur"], r["referral"]]),
-            ("Ad spend", "#F4B183", [r["marketing_per_unit"], r["marketing_per_unit"]]),
-            ("CM3", None, [r["cm3_cur"], r["cm3"]]),
-        ]
-        scenarios = ["Current", "Target"]
-        fig = go.Figure()
-        for name, color, values in segments:
-            colors = (
-                ["#70AD47" if v >= 0 else "#C00000" for v in values]
-                if name == "CM3"
-                else color
-            )
-            fig.add_bar(
-                y=scenarios,
-                x=values,
-                name=name,
-                orientation="h",
-                marker_color=colors,
-                text=[f"{v:.2f}" for v in values],
-                textposition="inside",
-                insidetextanchor="middle",
-                textangle=0,
-            )
-        fig.update_layout(
-            barmode="relative",
-            title=f"Net price breakdown ({cur}/unit)",
-            height=280,
-            margin={"t": 50, "b": 10, "l": 10, "r": 10},
-            legend={"orientation": "h", "y": -0.15},
-            xaxis={"title": None},
-            yaxis={"title": None, "categoryorder": "array", "categoryarray": ["Target", "Current"]},
-        )
-        st.plotly_chart(fig, width="stretch")
         st.caption(
-            f"Net price = costs + CM3 (green = profit, red = loss). "
-            f"Ad spend per unit: Amazon Ads, {spend_period_label()}."
+            f"Volume response: elasticity {r['elasticity']:.2f} "
+            f"({row['elasticity_method']}) → price {_ratio - 1:+.1%} ⇒ volume "
+            f"{_vol - 1:+.1%} · at {_units0:.0f} units sold in the window, "
+            f"total CM3 changes by {cur}{_delta_total:+,.0f}."
         )
+
+    # --- cost waterfall: scenario vs plan, with root-cause diagnostics ---
+    gap1 = (sc["cm1"][1] - cm1_t) * 100 if pd.notna(sc["cm1"][1]) else 0.0
+    gap2 = (sc["cm2"][1] - calc_cm2_target) * 100 if pd.notna(sc["cm2"][1]) else 0.0
+    gap3 = (sc["cm3"][1] - calc_cm3_target) * 100 if pd.notna(sc["cm3"][1]) else 0.0
+    cogs_pct = r["cogs"] / net if net > 0 else float("nan")
+    fba_pct = r["fba_fee"] / net if net > 0 else float("nan")
+    ref_pct = r["referral"] / net if net > 0 else float("nan")
+    ads_pct = r["marketing_per_unit"] / net if net > 0 else float("nan")
+    ads_ok = pd.notna(ads_pct) and dc_t is not None and ads_pct <= dc_t
+
+    # Cascading attribution: each CM gap (pp of net) splits exactly into what
+    # is inherited from the level above and what this level adds on top.
+    #   CM2 gap = CM1 gap + fee contribution;  CM3 gap = CM2 gap + ads contribution
+    own2 = gap2 - gap1  # fees vs their plan share (negative = fees heavier)
+    own3 = gap3 - gap2  # ads vs demand-capture plan (negative = ads heavier)
+
+    def _price_for(target: float, include_ads: bool) -> float:
+        """Gross price needed to hit a margin target, fees scaling with price."""
+        ref_rate = float(row.get("referral_rate", 0.15) or 0.15)
+        closing = float(row.get("closing_fee", 0) or 0)
+        fixed = float(row["cogs"]) + float(row["fba_fee"]) + closing
+        if include_ads:
+            fixed += float(row["marketing_per_unit"])
+        denom = (1 - target) / (1 + vat) - ref_rate
+        return fixed / denom if denom > 0 else float("nan")
+
+    if gap1 >= 0:
+        rc1 = "On plan"
+    elif pd.notna(cogs_pct) and (cogs_pct - cogs_t) * 100 > 2 and gap1 < -4:
+        rc1 = (f"<b>Price too low or COGS heavy</b> — COGS takes "
+               f"{cogs_pct * 100:.1f}% of net vs {cogs_t * 100:.0f}% plan")
+    else:
+        rc1 = "Price slightly low" if gap1 > -4 else "<b>Price too low</b>"
+
+    if gap2 >= 0:
+        rc2 = "On plan"
+    else:
+        inh = f"{gap1:+.1f}pp inherited from CM1" if gap1 < -0.05 else None
+        own = (f"fees add {own2:+.1f}pp vs plan share" if own2 < -0.5
+               else "FBA &amp; Referral on plan")
+        if inh and own2 >= -0.5:
+            rc2 = f"<b>Price too low</b> — {own} ({inh})"
+        elif inh:
+            rc2 = f"{inh} · <b>{own}</b>"
+        else:
+            rc2 = f"<b>FBA &amp; Referral above plan share</b> ({own2:+.1f}pp)"
+
+    rc_ads = ("Ads under control" if own3 >= -0.3
+              else f"<b>Ads above plan</b> ({own3:+.1f}pp vs demand-capture plan)")
+
+    if gap3 >= 0:
+        rc3 = "On plan"
+    elif own3 >= -0.3:
+        rc3 = (f"<b>Inherited from CM2</b> ({gap2:+.1f}pp) — not ads "
+               f"(ads {own3:+.1f}pp vs plan)")
+    elif gap2 >= -0.05:
+        rc3 = f"<b>Ads driving the gap</b> ({own3:+.1f}pp); CM2 was on plan"
+    else:
+        rc3 = (f"{gap2:+.1f}pp inherited from CM2 + "
+               f"<b>ads {own3:+.1f}pp above plan</b>")
+
+    def _money(v):
+        return f"{v:,.2f}"
+
+    def _p(v):
+        return f"{v * 100:.1f}%" if v is not None and pd.notna(v) else "—"
+
+    wrows = []
+
+    def _row(item, cur_eur, cur_pct, plan_pct, chip="", rc="", sub=False):
+        cls = " class='sub'" if sub else ""
+        wrows.append(
+            f"<tr{cls}><td>{item}</td><td>{cur_eur}</td><td>{cur_pct}</td>"
+            f"<td>{plan_pct}</td><td>{chip}</td>"
+            f"<td class='pp-rc'>{rc}</td></tr>"
+        )
+
+    _row("Price gross", _money(r["target_price"]), "—", "—")
+    _row("Price net", _money(net), "—", "—")
+    _row("− COGS", _money(-r["cogs"]), _p(cogs_pct), _p(cogs_t))
+    _row("CM1", _money(r["cm1"]), _p(sc["cm1"][1]), _p(cm1_t),
+         _chip(f"{'↑' if gap1 >= 0 else '↓'} {gap1:+.1f}pp", _gap_tone(gap1)), rc1, sub=True)
+    _row("− FBA", _money(-r["fba_fee"]), _p(fba_pct), "—")
+    _row("− Referral fee", _money(-r["referral"]), _p(ref_pct), "—")
+    _row("CM2", _money(r["cm2"]), _p(sc["cm2"][1]), _p(calc_cm2_target),
+         _chip(f"{'↑' if gap2 >= 0 else '↓'} {gap2:+.1f}pp", _gap_tone(gap2)), rc2, sub=True)
+    _row("− Ad spend *", _money(-r["marketing_per_unit"]), _p(ads_pct), _p(dc_t),
+         _chip("↑ below plan", "g") if ads_ok else _chip("↓ above plan", "r"), rc_ads)
+    _row("CM3", _money(r["cm3"]), _p(sc["cm3"][1]), _p(calc_cm3_target),
+         _chip(f"{'↑' if gap3 >= 0 else '↓'} {gap3:+.1f}pp", _gap_tone(gap3)), rc3, sub=True)
+
+    st.markdown(
+        "<div class='pp-head'>Cost waterfall — scenario vs plan</div>"
+        f"<table class='pp-tbl'><tr><th>Item</th><th>Scenario ({cur})</th>"
+        f"<th>Scenario %</th><th>Plan %</th>"
+        f"<th>Δ vs plan</th><th>Root cause</th></tr>{''.join(wrows)}</table>",
+        unsafe_allow_html=True,
+    )
+    max_ads = r["cm2"] - calc_cm3_target * net
+    st.caption(
+        f"\\* Amazon Ads spend ÷ units ordered, {spend_period_label()}. "
+        f"Headroom to CM3 target: up to {cur}{max(max_ads, 0):.2f}/unit "
+        f"({max(max_ads / net, 0) * 100:.1f}% of net) for ads + discounts at this price. "
+        "Plan benchmarks are percentages of net price (AP26)."
+    )
+
+    # One actionable conclusion from the cascade.
+    if gap3 >= 0 and gap2 >= 0:
+        st.success("On plan at this price — no action needed.")
+    elif gap3 < 0 and own3 >= -0.3:
+        _need = max(_price_for(calc_cm2_target, False), _price_for(calc_cm3_target, True))
+        _extra = ""
+        if pd.notna(_need) and use_elasticity and pd.notna(r.get("elasticity")) and row["current_price"] > 0:
+            _vf = (_need / row["current_price"]) ** r["elasticity"]
+            _extra = f" Expected volume effect at that price: {_vf - 1:+.1%}."
+        st.warning(
+            f"**Root cause: price, not ads.** Ads are {own3:+.1f}pp vs plan — "
+            f"cutting them won't close the gap. Raising the gross price to "
+            f"≥ {cur}{_need:.2f} hits both CM2 and CM3 targets.{_extra}"
+        )
+    elif gap3 < 0 and gap2 >= -0.05:
+        st.warning(
+            f"**Root cause: ad spend** ({own3:+.1f}pp above the demand-capture "
+            f"plan). Margins above CM2 are on plan — fix is ads efficiency, "
+            f"not price."
+        )
+    elif gap3 < 0:
+        _need = max(_price_for(calc_cm2_target, False), _price_for(calc_cm3_target, True))
+        st.warning(
+            f"**Root cause: both price and ads.** {gap2:+.1f}pp comes in below "
+            f"CM2 plan and ads add {own3:+.1f}pp on top. Price needed for "
+            f"target: ≥ {cur}{_need:.2f}, plus ads efficiency."
+        )
+
 
 # ===== Tab 3: FBA fee changes (current vs previous fee report version) =====
 with tab_fees:
