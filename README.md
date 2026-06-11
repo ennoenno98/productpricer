@@ -88,7 +88,7 @@ the sidebar (default 0.83).
 
 | File | Source | Refresh |
 |---|---|---|
-| `data/fee_history/products_*.csv` | Amazon **FBA fee preview report** + COGS, one dated snapshot per version; the newest is the live dataset | **manual**: upload the report in the dashboard, download the merged snapshot, commit it into `data/fee_history/` |
+| `data/fee_history/products_*.csv` | Amazon **FBA fee preview report** + COGS, one dated snapshot per version; the newest is the live dataset | **manual**: upload the report in the dashboard and click **💾 Save as new baseline** — it writes the dated snapshot and commits it to the repo via the GitHub API (set `GITHUB_TOKEN` on the server; optional `GITHUB_REPO`, `GITHUB_BRANCH`). Without a token it saves to local disk only (lost on redeploy) and you can download + commit manually |
 | `data/products.csv` | initial baseline (workbook sheet "AMZ Fees"), fallback when `fee_history/` is empty | `python extract_from_excel.py Margin_Check.xlsx` |
 | `data/marketing_spend.csv` | **Novadata daily margin export** (Amazon Ads spend ÷ units ordered, trailing 90 days, per SKU × marketplace) | **automatic**: daily GitHub Actions workflow `update_marketing_spend.yml` (07:00 UTC) commits the refresh; Render auto-deploys |
 | `data/metadata.json` | Ad-spend period (window + export dates) | written by the update workflow |
@@ -114,4 +114,4 @@ streamlit run streamlit_app.py
 ## Deploy (Render)
 
 `render.yaml` is included — same setup as the Margin-Analytics dashboard.
-Set `DASHBOARD_PASSWORD` in the Render service environment.
+Set `DASHBOARD_PASSWORD` in the Render service environment, plus `GITHUB_TOKEN` (fine-grained PAT with contents:write on this repo) so the dashboard's save button can persist uploaded FBA reports.

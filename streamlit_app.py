@@ -243,6 +243,73 @@ def load_data(
     return products, info
 
 
+def _github_config() -> tuple[str | None, str, str]:
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        try:
+            token = st.secrets["GITHUB_TOKEN"]
+        except Exception:
+            token = None
+    repo = os.environ.get("GITHUB_REPO", "ennoenno98/productpricer")
+    branch = os.environ.get("GITHUB_BRANCH", "main")
+    return token, repo, branch
+
+
+def push_snapshot_to_github(filename: str, content: bytes) -> tuple[bool, str]:
+    """Commit a fee snapshot to data/fee_history/ in the GitHub repo."""
+    token, repo, branch = _github_config()
+    if not token:
+        return False, (
+            "GITHUB_TOKEN is not configured on the server, so the snapshot is "
+            "saved on local disk only — it will be lost on the next redeploy. "
+            "Set GITHUB_TOKEN (fine-grained PAT with contents:write) in the "
+            "host environment to make saving permanent, or download the "
+            "snapshot and commit it manually."
+        )
+    import base64
+
+    import requests
+
+    url = f"https://api.github.com/repos/{repo}/contents/data/fee_history/{filename}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+    payload = {
+        "message": f"Add FBA fee snapshot {filename} (saved from dashboard)",
+        "content": base64.b64encode(content).decode(),
+        "branch": branch,
+    }
+    try:
+        probe = requests.get(url, headers=headers, params={"ref": branch}, timeout=30)
+        if probe.status_code == 200:
+            payload["sha"] = probe.json()["sha"]  # same-day re-save: update
+        resp = requests.put(url, headers=headers, json=payload, timeout=30)
+    except requests.RequestException as exc:
+        return False, f"GitHub commit failed: {exc}"
+    if resp.status_code in (200, 201):
+        return True, f"Committed to {repo}@{branch} — the deploy will pick it up."
+    detail = resp.json().get("message", "") if resp.headers.get("content-type", "").startswith("application/json") else ""
+    return False, f"GitHub commit failed ({resp.status_code} {detail})."
+
+
+def save_snapshot(df: pd.DataFrame, filename: str) -> list[tuple[str, str]]:
+    """Persist an uploaded report as the new baseline. Returns (level, msg) list."""
+    content = products_csv_for_repo(df)
+    messages: list[tuple[str, str]] = []
+    try:
+        target = DATA_DIR / "fee_history" / filename
+        target.parent.mkdir(exist_ok=True)
+        target.write_bytes(content)
+        messages.append(("success", f"Saved `{filename}` as the new baseline."))
+    except OSError as exc:
+        messages.append(("error", f"Could not write snapshot locally: {exc}"))
+        return messages
+    ok, msg = push_snapshot_to_github(filename, content)
+    messages.append(("success" if ok else "warning", msg))
+    return messages
+
+
 def products_csv_for_repo(df: pd.DataFrame) -> bytes:
     """Serialize the dataset back to the data/products.csv schema."""
     inverse = {
@@ -458,16 +525,28 @@ if report_file is not None:
                 "their margins show as empty."
             )
         _today = pd.Timestamp.today().date().isoformat()
+        _snap_name = f"products_{_today}.csv"
+        if st.sidebar.button(
+            "💾 Save as new baseline",
+            help=(
+                "Stores the uploaded report (merged with COGS) as "
+                f"data/fee_history/{_snap_name} and commits it to the GitHub "
+                "repo so it survives redeploys and becomes the comparison "
+                "baseline."
+            ),
+        ):
+            for level, msg in save_snapshot(data, _snap_name):
+                getattr(st.sidebar, level)(msg)
+            load_snapshot.clear()
+            load_data.clear()
         st.sidebar.download_button(
             "⬇️ Merged snapshot CSV",
             products_csv_for_repo(data),
-            file_name=f"products_{_today}.csv",
+            file_name=_snap_name,
             mime="text/csv",
             help=(
-                "The uploaded report combined with COGS. Commit this file into "
-                "data/fee_history/ to make it the new baseline (uploads only "
-                "last for the current session). The FBA fee changes tab always "
-                "compares the two newest files in that folder."
+                "Manual alternative to the save button: download and commit "
+                "into data/fee_history/ yourself."
             ),
         )
 if data is None:
