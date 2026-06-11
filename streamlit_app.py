@@ -251,7 +251,13 @@ def _github_config() -> tuple[str | None, str, str]:
         except Exception:
             token = None
     repo = os.environ.get("GITHUB_REPO", "ennoenno98/productpricer")
-    branch = os.environ.get("GITHUB_BRANCH", "main")
+    # Default to the branch this deployment runs from (Render sets
+    # RENDER_GIT_BRANCH), so saved snapshots land where the deploy reads them.
+    branch = (
+        os.environ.get("GITHUB_BRANCH")
+        or os.environ.get("RENDER_GIT_BRANCH")
+        or "main"
+    )
     return token, repo, branch
 
 
@@ -301,7 +307,11 @@ def save_snapshot(df: pd.DataFrame, filename: str) -> list[tuple[str, str]]:
         target = DATA_DIR / "fee_history" / filename
         target.parent.mkdir(exist_ok=True)
         target.write_bytes(content)
-        messages.append(("success", f"Saved `{filename}` as the new baseline."))
+        messages.append((
+            "success",
+            f"Saved `{filename}` as the new baseline — colleagues see it "
+            "after a page refresh.",
+        ))
     except OSError as exc:
         messages.append(("error", f"Could not write snapshot locally: {exc}"))
         return messages
@@ -448,6 +458,17 @@ with st.sidebar:
             "Replaces prices and Amazon fees for this session; COGS is carried "
             "over from the bundled data when the report has no COGS column."
         ),
+    )
+    _snaps_now = fee_snapshot_files()
+    _gh_token, _, _gh_branch = _github_config()
+    st.caption(
+        f"Baseline in use: `{_snaps_now[-1].name if _snaps_now else 'products.csv'}` · "
+        + (
+            f"saves are permanent (committed to `{_gh_branch}`) ✅"
+            if _gh_token
+            else "⚠️ saves are **temporary** — GITHUB_TOKEN is not set, so a "
+            "saved report disappears when the server restarts/redeploys"
+        )
     )
     st.header("Plan targets (AP26)")
     target_month = st.selectbox(
