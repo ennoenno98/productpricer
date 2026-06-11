@@ -648,9 +648,11 @@ with tab_sheet:
         ]
     ].reset_index(drop=True)
 
-    # Color-code margins vs the country's plan targets (green >= target).
+    # Color-code margins vs the country's plan targets (green >= target);
+    # scenario-result columns get a blue tint to set them apart from base data.
     _plan_all = load_targets()["cm1_target"]
     cm1_target = _plan_all.get(country, sum(_plan_all.values()) / len(_plan_all))
+    SCENARIO_COLS = ["price_change", "cm1", "cm2", "cm3", "cm3_delta", "profit_delta"]
 
     def _vs_target(target: float):
         def _color(v):
@@ -664,10 +666,22 @@ with tab_sheet:
 
     styled = (
         show.style
+        .set_properties(subset=SCENARIO_COLS, **{"background-color": "#EFF5FF"})
         .map(_vs_target(cm1_target), subset=["cm1_pct"])
         .map(_vs_target(cm2_target), subset=["cm2_pct"])
         .map(_vs_target(cm3_target), subset=["cm3_pct"])
     )
+
+    with st.expander("ℹ️ How this pricing scenario works"):
+        st.markdown(
+            f"""
+- **Edit the “✏️ New price” column** — margins, flags and totals recalculate instantly. *Reset all prices* below the table reverts to current prices.
+- **Green / red cells**: margin % at or above vs below the {COUNTRY_NAMES.get(country, country)} plan targets (CM1 ≥ {cm1_target * 100:.0f}%, CM2 ≥ {cm2_target * 100:.1f}%, CM3 ≥ {cm3_target * 100:.1f}%, AP26{', ' + target_month if plan_month else ''}).
+- **Blue columns** are scenario results at the new price. The referral fee re-scales with the price; COGS, FBA and ad spend per unit stay fixed.
+- **Δ CM3 € total** = profit impact at the units sold in the window ({spend_period_label()}){", with volume scaled by each SKU's price elasticity" if use_elasticity else " — volume held constant (elasticity toggle is off)"}.
+- White columns are current data: prices and fees from the latest FBA report, ad spend from Novadata (auto-updated daily).
+"""
+        )
 
     edited = st.data_editor(
         styled,
