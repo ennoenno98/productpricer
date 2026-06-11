@@ -623,10 +623,20 @@ with tab_sheet:
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Products", len(base))
     m2.metric("Prices changed", n_changed)
+    _w = base.dropna(subset=["cm3", "cm3_cur", "net", "net_cur"])
+    _rev_new = (_w["net"] * _w["units_new"]).sum()
+    _rev_cur = (_w["net_cur"] * _w["units_window"]).sum()
+    cm3_w_new = (_w["cm3"] * _w["units_new"]).sum() / _rev_new if _rev_new > 0 else float("nan")
+    cm3_w_cur = (_w["cm3_cur"] * _w["units_window"]).sum() / _rev_cur if _rev_cur > 0 else float("nan")
     m3.metric(
-        "Avg CM3 % (new)",
-        f"{base['cm3_pct'].mean() * 100:.1f}%",
-        delta=f"{(base['cm3_pct'].mean() - base['cm3_pct_cur'].mean()) * 100:+.1f} pp",
+        "CM3 % (revenue-weighted)",
+        f"{cm3_w_new * 100:.1f}%",
+        delta=f"{(cm3_w_new - cm3_w_cur) * 100:+.1f} pp",
+        help=(
+            "Σ(CM3 € × units) ÷ Σ(net price × units) — weighted by what actually "
+            "sells, not a simple average over SKUs. Units from the ad-spend window"
+            + (", scaled by elasticity at the new price." if use_elasticity else ".")
+        ),
     )
     m4.metric("Below CM3 target", int((base["cm3_pct"] < cm3_target).sum()))
     m5.metric(
@@ -1228,11 +1238,3 @@ with tab_fees:
             mime="text/csv",
         )
 
-st.caption(
-    "CM1 = net price − COGS · CM2 = CM1 − FBA − referral fee · CM3 = CM2 − ad spend per unit "
-    f"(Amazon Ads, {spend_period_label()}). "
-    "Referral fees are recalculated from the simulated price (rate derived from Amazon's fee "
-    "preview); FBA fees and ad spend per unit are held constant. Margins are % of net price. "
-    "VAT is fixed per country; margin targets are country-specific from the AP26 plan "
-    "('Amazon Margins' tab)."
-)
