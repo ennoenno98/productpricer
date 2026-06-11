@@ -564,12 +564,28 @@ tab_sheet, tab_calc, tab_fees = st.tabs(
 
 # ===== Tab 1: per-country pricing sheet =====
 with tab_sheet:
-    country = st.selectbox(
-        "Country",
-        countries,
-        format_func=lambda c: f"{COUNTRY_NAMES.get(c, c)} ({c})",
-        key="sheet_country",
-    )
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        country = st.selectbox(
+            "Country",
+            countries,
+            format_func=lambda c: f"{COUNTRY_NAMES.get(c, c)} ({c})",
+            key="sheet_country",
+        )
+    disc_key = f"portfolio_discount_{country}"
+    if st.session_state.pop(f"_reset_{disc_key}", False):
+        st.session_state[disc_key] = 0.0
+    with col_b:
+        portfolio_discount = st.number_input(
+            "Target discount on all products (%)",
+            0.0, 90.0, 0.0, 1.0,
+            key=disc_key,
+            help=(
+                "Applies to every product in this country: the scenario price "
+                "becomes current price × (1 − discount). Individual edits in "
+                "the “New price” column override the discount per SKU."
+            ),
+        )
     vat = VAT_RATES.get(country, 0.20)
     cm2_target, cm3_target = country_targets(country, plan_month)
     st.caption(
@@ -594,7 +610,8 @@ with tab_sheet:
     overrides: dict[str, float] = st.session_state.setdefault(price_key, {})
 
     base = cdf.copy()
-    base["new_price"] = base["sku"].map(overrides).fillna(base["current_price"])
+    default_price = (base["current_price"] * (1 - portfolio_discount / 100)).round(2)
+    base["new_price"] = base["sku"].map(overrides).fillna(default_price)
     base = compute_margins(base, "current_price", vat, "_cur")
     base = compute_margins(base, "new_price", vat, "")
     base["price_change"] = base["new_price"] - base["current_price"]
@@ -685,7 +702,8 @@ with tab_sheet:
     with st.expander("ℹ️ How this pricing scenario works"):
         st.markdown(
             f"""
-- **Edit the “✏️ New price” column** — margins, flags and totals recalculate instantly. *Reset all prices* below the table reverts to current prices.
+- **Edit the “✏️ New price” column** — margins, flags and totals recalculate instantly. *Reset all prices* below the table reverts to current prices and clears the discount.
+- **Target discount (top right)** applies to the whole country portfolio at once (scenario price = current × (1 − discount)); individual price edits override it per SKU.
 - **Green / red cells**: margin % at or above vs below the {COUNTRY_NAMES.get(country, country)} plan targets (CM1 ≥ {cm1_target * 100:.0f}%, CM2 ≥ {cm2_target * 100:.1f}%, CM3 ≥ {cm3_target * 100:.1f}%, AP26{', ' + target_month if plan_month else ''}).
 - **Blue columns** are scenario results at the new price. The referral fee re-scales with the price; COGS, FBA and ad spend per unit stay fixed.
 - **Δ CM3 € total** = profit impact at the units sold in the window ({spend_period_label()}){", with volume scaled by each SKU's price elasticity" if use_elasticity else " — volume held constant (elasticity toggle is off)"}.
@@ -753,10 +771,13 @@ with tab_sheet:
         },
     )
 
-    # Persist edits and recompute the margin columns immediately.
+    # Persist edits and recompute the margin columns immediately. An edit only
+    # becomes a per-SKU override when it differs from the portfolio-discount
+    # default, so adjusting the discount later still moves non-edited rows.
+    _defaults = dict(zip(base["sku"], default_price))
     new_overrides = {}
     for _, row in edited.iterrows():
-        if pd.notna(row["new_price"]) and abs(row["new_price"] - base.loc[base["sku"] == row["sku"], "current_price"].iloc[0]) > 0.004:
+        if pd.notna(row["new_price"]) and abs(row["new_price"] - _defaults.get(row["sku"], row["new_price"])) > 0.004:
             new_overrides[row["sku"]] = float(row["new_price"])
     if new_overrides != overrides:
         st.session_state[price_key] = new_overrides
@@ -766,6 +787,7 @@ with tab_sheet:
     with col_r:
         if st.button("↩️ Reset all prices", key=f"reset_{country}"):
             st.session_state[price_key] = {}
+            st.session_state[f"_reset_{disc_key}"] = True
             st.rerun()
     with col_d:
         st.download_button(
