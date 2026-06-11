@@ -826,6 +826,12 @@ CALC_CSS = """
 .pp-tbl td { padding:7px 10px; border-bottom:1px solid #f3f4f6;
   text-align:right; color:#374151; }
 .pp-tbl tr.sub td { background:#f7f9fc; font-weight:700; color:#111827; }
+.pp-tbl th.cur, .pp-tbl td.cur { background:#f3f4f6; }
+.pp-tbl th.sc, .pp-tbl td.sc { background:#eff5ff; }
+.pp-tbl th.cur { color:#4b5563; }
+.pp-tbl th.sc { color:#1d4ed8; }
+.pp-tbl tr.sub td.cur { background:#e9ebef; }
+.pp-tbl tr.sub td.sc { background:#dfeafd; }
 .pp-rc { color:#6b7280; font-size:0.78rem; }
 .pp-rc b { color:#374151; }
 </style>
@@ -1016,8 +1022,9 @@ with tab_calc:
     def _row(item, now_eur, now_pct, sc_eur, sc_pct, plan_pct, chip="", rc="", sub=False):
         cls = " class='sub'" if sub else ""
         wrows.append(
-            f"<tr{cls}><td>{item}</td><td>{now_eur}</td><td>{now_pct}</td>"
-            f"<td>{sc_eur}</td><td>{sc_pct}</td>"
+            f"<tr{cls}><td>{item}</td>"
+            f"<td class='cur'>{now_eur}</td><td class='cur'>{now_pct}</td>"
+            f"<td class='sc'>{sc_eur}</td><td class='sc'>{sc_pct}</td>"
             f"<td>{plan_pct}</td><td>{chip}</td>"
             f"<td class='pp-rc'>{rc}</td></tr>"
         )
@@ -1051,9 +1058,9 @@ with tab_calc:
 
     st.markdown(
         "<div class='pp-head'>Cost waterfall — scenario vs plan</div>"
-        f"<table class='pp-tbl'><tr><th>Item</th><th>Current ({cur})</th>"
-        f"<th>Current %</th><th>Scenario ({cur})</th>"
-        f"<th>Scenario %</th><th>Plan %</th>"
+        f"<table class='pp-tbl'><tr><th>Item</th><th class='cur'>Current ({cur})</th>"
+        f"<th class='cur'>Current %</th><th class='sc'>Scenario ({cur})</th>"
+        f"<th class='sc'>Scenario %</th><th>Plan %</th>"
         f"<th>Δ vs plan</th><th>Root cause</th></tr>{''.join(wrows)}</table>",
         unsafe_allow_html=True,
     )
