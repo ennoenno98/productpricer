@@ -352,20 +352,26 @@ def _new_price_header(cur: str) -> str:
 def pricing_template_xlsx(show: pd.DataFrame, country: str, cur: str) -> bytes:
     """Excel template for bulk price editing.
 
-    The marketing team downloads this, edits the "New price" column in Excel,
-    and re-uploads it to simulate. Only SKU + New price are read back; the
-    other columns are there for reference.
+    The marketing team downloads this, types the new price into the (blank)
+    "New price" column for the SKUs they want to change, and re-uploads it.
+    Leaving "New price" blank keeps the current price. The "New price" column
+    is pre-filled only where the current scenario already overrides a SKU.
     """
+    cur_h = f"Current price ({cur})"
+    new_h = _new_price_header(cur)
     cols = ["sku", "product_name", "current_price", "new_price",
             "cm1_pct", "cm2_pct", "cm3_pct"]
     rename = {
-        "sku": "SKU",
-        "product_name": "Product",
-        "current_price": f"Current price ({cur})",
-        "new_price": _new_price_header(cur),
-        "cm1_pct": "CM1 %", "cm2_pct": "CM2 %", "cm3_pct": "CM3 %",
+        "sku": "SKU", "product_name": "Product", "current_price": cur_h,
+        "new_price": new_h, "cm1_pct": "CM1 %", "cm2_pct": "CM2 %",
+        "cm3_pct": "CM3 %",
     }
     out = show[[c for c in cols if c in show.columns]].rename(columns=rename)
+    # Blank "New price" where it equals current (no active edit) so the column
+    # reads as an empty fill-in field rather than a copy of the current price.
+    same = out[new_h].round(2).eq(out[cur_h].round(2))
+    out[new_h] = out[new_h].where(~same, "")
+
     buf = io.BytesIO()
     sheet = f"Pricing {country}"
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
@@ -382,45 +388,63 @@ def parse_uploaded_pricing(
 ) -> tuple[dict[str, float], dict]:
     """Read an edited pricing template (xlsx/csv) -> {sku: new_price} overrides.
 
-    Only prices that (a) match a SKU in the current country data and (b) differ
-    from the current price are kept as overrides. Returns (overrides, info).
+    Only prices that (a) match a SKU, (b) are non-blank, and (c) differ from the
+    current price become overrides. Returns (overrides, info) where info also
+    carries diagnostics (detected column, a parsed sample, wrong-column hint).
     """
     name = file.name.lower()
     raw = file.getvalue()
     if name.endswith((".xlsx", ".xls")):
         df = pd.read_excel(io.BytesIO(raw))
     else:
-        for enc in ("utf-8-sig", "latin-1"):
+        # German Excel exports use ';' + comma decimals; let the python engine
+        # sniff the delimiter, trying utf-8 then cp1252/latin-1.
+        df = None
+        for enc in ("utf-8-sig", "cp1252", "latin-1"):
             try:
                 df = pd.read_csv(io.StringIO(raw.decode(enc)), sep=None, engine="python")
                 break
             except (UnicodeDecodeError, ValueError):
                 continue
+        if df is None:
+            raise ValueError("Could not decode the CSV file.")
     df.columns = [str(c).strip().lower() for c in df.columns]
     sku_col = next((c for c in df.columns if c == "sku" or c.startswith("sku")), None)
-    price_col = next((c for c in df.columns if "new price" in c), None)
+    price_col = next((c for c in df.columns if "new price" in c or "new_price" in c), None)
     if price_col is None:
         price_col = next((c for c in df.columns if c.startswith("new")), None)
+    cur_col = next((c for c in df.columns if "current price" in c or c == "current_price"), None)
     if sku_col is None or price_col is None:
         raise ValueError(
-            "Could not find a 'SKU' and a 'New price' column. Use the downloaded "
-            "template and keep those column headers."
+            f"Could not find a 'SKU' and a 'New price' column (saw: "
+            f"{', '.join(map(str, df.columns))}). Use the downloaded template "
+            "and keep those column headers."
         )
     df["_sku"] = df[sku_col].astype(str).str.strip()
     df["_price"] = _to_num(df[price_col])
+    df["_file_cur"] = _to_num(df[cur_col]) if cur_col else float("nan")
 
     overrides: dict[str, float] = {}
-    matched = unmatched = changed = invalid = 0
+    matched = unmatched = changed = blank = invalid = 0
+    wrong_col_hits = 0
+    sample = None
     for _, r in df.iterrows():
         sku = r["_sku"]
-        if sku in ("", "nan") or pd.isna(r["_price"]):
-            if sku not in ("", "nan") and pd.isna(r["_price"]):
-                invalid += 1
+        if sku in ("", "nan"):
             continue
         if sku not in current_by_sku:
             unmatched += 1
             continue
         matched += 1
+        # Did they (accidentally) edit the Current price column instead?
+        if (
+            cur_col and pd.notna(r["_file_cur"])
+            and abs(r["_file_cur"] - current_by_sku[sku]) > 0.004
+        ):
+            wrong_col_hits += 1
+        if pd.isna(r["_price"]):
+            blank += 1  # blank New price = keep current price
+            continue
         price = round(float(r["_price"]), 2)
         if price < 0:
             invalid += 1
@@ -428,9 +452,12 @@ def parse_uploaded_pricing(
         if abs(price - current_by_sku[sku]) > 0.004:
             overrides[sku] = price
             changed += 1
+            if sample is None:
+                sample = f"{sku}: {current_by_sku[sku]:.2f} → {price:.2f}"
     info = {
-        "matched": matched, "unmatched": unmatched,
-        "changed": changed, "invalid": invalid,
+        "matched": matched, "unmatched": unmatched, "changed": changed,
+        "blank": blank, "invalid": invalid, "column": price_col,
+        "sample": sample, "wrong_column": wrong_col_hits > matched / 2 > 0,
     }
     return overrides, info
 
@@ -821,7 +848,7 @@ with tab_sheet:
 - **Blue columns** are scenario results at the new price. The referral fee re-scales with the price; COGS, FBA and ad spend per unit stay fixed.
 - **Δ CM3 € total** = profit impact at the units sold in the window ({spend_period_label()}){", with volume scaled by each SKU's price elasticity" if use_elasticity else " — volume held constant (elasticity toggle is off)"}.
 - White columns are current data: prices and fees from the latest FBA report, ad spend from Novadata (auto-updated daily).
-- **Bulk edit in Excel**: download the price sheet (Excel) below, edit the “New price” column, and upload it again — prices are matched by SKU and applied as the scenario (rows left at the current price are ignored).
+- **Bulk edit in Excel**: download the price sheet (Excel) below; the **New price** column is blank. Type a new price next to any SKU you want to change (leave the rest blank — e.g. `=C2*0.9` for −10%), save, and upload it again. Prices are matched by SKU; blank rows keep the current price.
 """
         )
 
@@ -945,14 +972,26 @@ with tab_sheet:
                 level = "success"
                 msg = (
                     f"Applied **{uploaded.name}**: {up_info['changed']} price "
-                    f"change(s) from {up_info['matched']} matched SKU(s)."
+                    f"change(s) from {up_info['matched']} matched SKU(s) "
+                    f"(read from “{up_info['column']}”, e.g. {up_info['sample']})."
+                )
+            elif up_info["wrong_column"]:
+                level = "warning"
+                msg = (
+                    f"**{uploaded.name}**: the “New price” column was blank/"
+                    "unchanged, but the **Current price** column differs from "
+                    "ours on many rows — it looks like the prices were typed "
+                    "into the wrong column. Put the new prices in the "
+                    f"“{_new_price_header(cur)}” column and re-upload."
                 )
             else:
                 level = "warning"
                 msg = (
                     f"**{uploaded.name}** changed no prices — "
-                    f"{up_info['matched']} SKU(s) matched but all were at the "
-                    "current price. Check the “New price” column was edited."
+                    f"{up_info['matched']} SKU(s) matched but the “New price” "
+                    f"column was blank or equal to the current price "
+                    f"({up_info['blank']} blank). Type the new prices into the "
+                    f"“{_new_price_header(cur)}” column and re-upload."
                 )
             if up_info["unmatched"]:
                 msg += f" {up_info['unmatched']} row(s) had no matching SKU and were skipped."
