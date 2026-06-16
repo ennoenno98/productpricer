@@ -343,6 +343,98 @@ def products_csv_for_repo(df: pd.DataFrame) -> bytes:
     return out[cols].rename(columns=inverse).to_csv(index=False).encode("utf-8")
 
 
+# Header for the editable "New price" column in the bulk-edit Excel template.
+# Used both when writing the template and when parsing it back on upload.
+def _new_price_header(cur: str) -> str:
+    return f"New price ({cur})"
+
+
+def pricing_template_xlsx(show: pd.DataFrame, country: str, cur: str) -> bytes:
+    """Excel template for bulk price editing.
+
+    The marketing team downloads this, edits the "New price" column in Excel,
+    and re-uploads it to simulate. Only SKU + New price are read back; the
+    other columns are there for reference.
+    """
+    cols = ["sku", "product_name", "current_price", "new_price",
+            "cm1_pct", "cm2_pct", "cm3_pct"]
+    rename = {
+        "sku": "SKU",
+        "product_name": "Product",
+        "current_price": f"Current price ({cur})",
+        "new_price": _new_price_header(cur),
+        "cm1_pct": "CM1 %", "cm2_pct": "CM2 %", "cm3_pct": "CM3 %",
+    }
+    out = show[[c for c in cols if c in show.columns]].rename(columns=rename)
+    buf = io.BytesIO()
+    sheet = f"Pricing {country}"
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        out.to_excel(writer, index=False, sheet_name=sheet)
+        ws = writer.sheets[sheet]
+        for i, width in enumerate([18, 60, 16, 16, 9, 9, 9]):
+            ws.column_dimensions[chr(ord("A") + i)].width = width
+        ws.freeze_panes = "A2"
+    return buf.getvalue()
+
+
+def parse_uploaded_pricing(
+    file, current_by_sku: dict[str, float]
+) -> tuple[dict[str, float], dict]:
+    """Read an edited pricing template (xlsx/csv) -> {sku: new_price} overrides.
+
+    Only prices that (a) match a SKU in the current country data and (b) differ
+    from the current price are kept as overrides. Returns (overrides, info).
+    """
+    name = file.name.lower()
+    raw = file.getvalue()
+    if name.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(io.BytesIO(raw))
+    else:
+        for enc in ("utf-8-sig", "latin-1"):
+            try:
+                df = pd.read_csv(io.StringIO(raw.decode(enc)), sep=None, engine="python")
+                break
+            except (UnicodeDecodeError, ValueError):
+                continue
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    sku_col = next((c for c in df.columns if c == "sku" or c.startswith("sku")), None)
+    price_col = next((c for c in df.columns if "new price" in c), None)
+    if price_col is None:
+        price_col = next((c for c in df.columns if c.startswith("new")), None)
+    if sku_col is None or price_col is None:
+        raise ValueError(
+            "Could not find a 'SKU' and a 'New price' column. Use the downloaded "
+            "template and keep those column headers."
+        )
+    df["_sku"] = df[sku_col].astype(str).str.strip()
+    df["_price"] = _to_num(df[price_col])
+
+    overrides: dict[str, float] = {}
+    matched = unmatched = changed = invalid = 0
+    for _, r in df.iterrows():
+        sku = r["_sku"]
+        if sku in ("", "nan") or pd.isna(r["_price"]):
+            if sku not in ("", "nan") and pd.isna(r["_price"]):
+                invalid += 1
+            continue
+        if sku not in current_by_sku:
+            unmatched += 1
+            continue
+        matched += 1
+        price = round(float(r["_price"]), 2)
+        if price < 0:
+            invalid += 1
+            continue
+        if abs(price - current_by_sku[sku]) > 0.004:
+            overrides[sku] = price
+            changed += 1
+    info = {
+        "matched": matched, "unmatched": unmatched,
+        "changed": changed, "invalid": invalid,
+    }
+    return overrides, info
+
+
 @st.cache_data(show_spinner=False)
 def load_metadata() -> dict:
     try:
@@ -729,6 +821,7 @@ with tab_sheet:
 - **Blue columns** are scenario results at the new price. The referral fee re-scales with the price; COGS, FBA and ad spend per unit stay fixed.
 - **Δ CM3 € total** = profit impact at the units sold in the window ({spend_period_label()}){", with volume scaled by each SKU's price elasticity" if use_elasticity else " — volume held constant (elasticity toggle is off)"}.
 - White columns are current data: prices and fees from the latest FBA report, ad spend from Novadata (auto-updated daily).
+- **Bulk edit in Excel**: download the price sheet (Excel) below, edit the “New price” column, and upload it again — prices are matched by SKU and applied as the scenario (rows left at the current price are ignored).
 """
         )
 
@@ -809,14 +902,52 @@ with tab_sheet:
         if st.button("↩️ Reset all prices", key=f"reset_{country}"):
             st.session_state[price_key] = {}
             st.session_state[f"_reset_{disc_key}"] = True
+            st.session_state.pop(f"_uploaded_{country}", None)
             st.rerun()
     with col_d:
         st.download_button(
-            "⬇️ Download price sheet (CSV)",
-            show.to_csv(index=False).encode("utf-8"),
-            file_name=f"pricing_{country}.csv",
-            mime="text/csv",
+            "⬇️ Download price sheet (Excel)",
+            pricing_template_xlsx(show, country, cur),
+            file_name=f"pricing_{country}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help=(
+                "Bulk-edit the “New price” column in Excel, then upload it below "
+                "to simulate the whole portfolio at once."
+            ),
         )
+
+    uploaded = st.file_uploader(
+        "⬆️ Upload edited price sheet",
+        type=["xlsx", "xls", "csv"],
+        key=f"upload_pricing_{country}",
+        help=(
+            "Re-upload the downloaded template after editing the “New price” "
+            "column. Prices are matched by SKU and applied as the scenario; "
+            "rows left at the current price are ignored."
+        ),
+    )
+    if uploaded is not None and st.session_state.get(f"_uploaded_{country}") != uploaded.file_id:
+        try:
+            up_overrides, up_info = parse_uploaded_pricing(
+                uploaded, dict(zip(base["sku"], base["current_price"]))
+            )
+        except Exception as exc:
+            st.error(f"Could not read '{uploaded.name}': {exc}")
+        else:
+            st.session_state[f"_uploaded_{country}"] = uploaded.file_id
+            st.session_state[price_key] = up_overrides
+            msg = (
+                f"Applied **{uploaded.name}**: {up_info['changed']} price change(s) "
+                f"from {up_info['matched']} matched SKU(s)."
+            )
+            if up_info["unmatched"]:
+                msg += f" {up_info['unmatched']} row(s) had no matching SKU and were skipped."
+            if up_info["invalid"]:
+                msg += f" {up_info['invalid']} row(s) had an invalid price and were skipped."
+            st.session_state[f"_upload_msg_{country}"] = msg
+            st.rerun()
+    if st.session_state.get(f"_upload_msg_{country}"):
+        st.success(st.session_state.pop(f"_upload_msg_{country}"))
 
 
 # ===== Tab 2: single-product calculator (scenario vs plan) =====

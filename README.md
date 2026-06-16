@@ -9,7 +9,10 @@ live. Modelled on the *"Margen Calc AMZ"* sheet of `Margin_Check_V5.xlsx`.
 - **Country pricing sheet** — one editable sheet per marketplace
   (DE, IT, ES, FR, GB, IE, NL, BE). Edit the *New price* column; CM1/CM2/CM3
   (€ and %) recalculate instantly. Status flags products below the CM3 target,
-  summary metrics show portfolio impact, and the sheet can be downloaded as CSV.
+  summary metrics show portfolio impact. **Bulk edit round-trip**: download the
+  sheet as **Excel**, edit the *New price* column for many SKUs at once, and
+  upload it back — prices are matched by SKU and applied as the scenario (rows
+  left at the current price are ignored).
 - **Product calculator** — single-product deep dive: target price or discount,
   full margin breakdown (the Excel calculator's layout), waterfall chart, and
   "how much can I spend on ads/discounts and stay on target".
