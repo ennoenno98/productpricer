@@ -903,6 +903,7 @@ with tab_sheet:
             st.session_state[price_key] = {}
             st.session_state[f"_reset_{disc_key}"] = True
             st.session_state.pop(f"_uploaded_{country}", None)
+            st.session_state.pop(f"editor_{country}", None)
             st.rerun()
     with col_d:
         st.download_button(
@@ -926,7 +927,8 @@ with tab_sheet:
             "rows left at the current price are ignored."
         ),
     )
-    if uploaded is not None and st.session_state.get(f"_uploaded_{country}") != uploaded.file_id:
+    _file_id = getattr(uploaded, "file_id", uploaded.name if uploaded else None)
+    if uploaded is not None and st.session_state.get(f"_uploaded_{country}") != _file_id:
         try:
             up_overrides, up_info = parse_uploaded_pricing(
                 uploaded, dict(zip(base["sku"], base["current_price"]))
@@ -934,20 +936,33 @@ with tab_sheet:
         except Exception as exc:
             st.error(f"Could not read '{uploaded.name}': {exc}")
         else:
-            st.session_state[f"_uploaded_{country}"] = uploaded.file_id
+            st.session_state[f"_uploaded_{country}"] = _file_id
             st.session_state[price_key] = up_overrides
-            msg = (
-                f"Applied **{uploaded.name}**: {up_info['changed']} price change(s) "
-                f"from {up_info['matched']} matched SKU(s)."
-            )
+            # Clear the data-editor's cached edit-state so the table rebuilds
+            # from the uploaded prices instead of replaying stale manual edits.
+            st.session_state.pop(f"editor_{country}", None)
+            if up_info["changed"]:
+                level = "success"
+                msg = (
+                    f"Applied **{uploaded.name}**: {up_info['changed']} price "
+                    f"change(s) from {up_info['matched']} matched SKU(s)."
+                )
+            else:
+                level = "warning"
+                msg = (
+                    f"**{uploaded.name}** changed no prices — "
+                    f"{up_info['matched']} SKU(s) matched but all were at the "
+                    "current price. Check the “New price” column was edited."
+                )
             if up_info["unmatched"]:
                 msg += f" {up_info['unmatched']} row(s) had no matching SKU and were skipped."
             if up_info["invalid"]:
                 msg += f" {up_info['invalid']} row(s) had an invalid price and were skipped."
-            st.session_state[f"_upload_msg_{country}"] = msg
+            st.session_state[f"_upload_msg_{country}"] = (level, msg)
             st.rerun()
     if st.session_state.get(f"_upload_msg_{country}"):
-        st.success(st.session_state.pop(f"_upload_msg_{country}"))
+        _lvl, _msg = st.session_state.pop(f"_upload_msg_{country}")
+        getattr(st, _lvl)(_msg)
 
 
 # ===== Tab 2: single-product calculator (scenario vs plan) =====
