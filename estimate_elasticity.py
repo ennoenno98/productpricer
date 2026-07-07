@@ -6,22 +6,36 @@ Usage:
 
 Method
 ------
-Daily series from the Novadata margin export (12 months): implied price =
-Product Sales / Units. Days are flagged as promo days from two sources:
-  1. Promotion windows in data/promotions.csv (Seller Central report),
-     attributed to marketplaces by matching the promo price against the
-     median implied price inside the window (+-6%; EUR->GBP for amazon.co.uk).
-  2. Inferred price dips: implied price <= 93% of the centered 28-day
-     rolling median (catches promos missing from the report).
+Daily series from the Novadata margin export (12 months). The regressor is the
+POSTED price, reconstructed by rounding implied price (Product Sales / Units)
+to a 0.10 grid. Rounding severs the mechanical link where Units — the ln(Units)
+regressand — also sits in the denominator of Sales/Units, which would otherwise
+bias the slope negative (division bias). Extreme implied-price days (bundles,
+mis-recorded revenue) are dropped so one leverage point can't set the fit.
+
+Days are flagged as promo either from Seller Central promotion windows
+(data/promotions.csv, matched to marketplaces by price) or as price dips
+<= 93% of a trailing 35-CALENDAR-day median of NON-promo prices — so a
+sustained reported promo cannot drag its own baseline down and mask itself,
+and sparse-sales SKUs use real elapsed time rather than an N-row window.
 
 Per qualifying series, OLS on log-log with controls:
-    ln(units) ~ ln(price) + promo_day + ln(1+ad_spend) + month + day-of-week
-The ln(price) coefficient is the everyday elasticity; promo lift is absorbed
-by the promo_day dummy so deal visibility doesn't inflate price sensitivity.
+    ln(units) ~ ln(posted_price) + promo_day + ln(1+ad_spend) + month + dow
+solved via SVD with an explicit rank check: rank-deficient (unidentified)
+designs are dropped, and standard errors come from the same decomposition, so a
+near-collinear price column yields a large SE (failing the gate) rather than a
+spuriously small one.
 
-Estimates are shrunk toward the country's trimmed mean (precision-weighted),
-clipped to [-9, -0.3], and written to data/elasticity.csv together with a
-"_default" row per country for SKUs without their own estimate.
+Estimates are shrunk (empirical Bayes) toward the country's trimmed-mean prior,
+or a GLOBAL prior when a country has too few series (no hardcoded constant).
+Series whose raw estimate has the wrong sign (>= 0) are NOT reported as
+estimated — they fall back to the prior and are marked low confidence, rather
+than being clipped up to -0.3 and passed off as a real coefficient. Every row
+carries a `confidence` flag.
+
+CAVEAT: price here is observational — sellers/Amazon set it in response to
+demand — so these are ASSOCIATIONAL elasticities, not experimentally identified
+causal effects. Validate with a real price test before large moves.
 """
 from __future__ import annotations
 
@@ -46,12 +60,17 @@ MARKETPLACE_TO_COUNTRY = {
 }
 EUR_TO_GBP = 0.85          # promo prices are EUR; amazon.co.uk prices GBP
 PROMO_PRICE_TOL = 0.06     # +-6% to attribute a promo window to a marketplace
-DIP_THRESHOLD = 0.93       # inferred promo: price <= 93% of rolling median
+PRICE_GRID = 0.10          # round implied price to posted-price grid (division-bias fix)
+OUTLIER_LOG = 0.5          # drop days where |ln(price / series median)| exceeds this
+DIP_WINDOW = "35D"         # trailing CALENDAR window for the regular-price baseline
+DIP_MIN_OBS = 5            # min non-promo observations in the baseline window
+DIP_THRESHOLD = 0.93       # inferred promo: price <= 93% of regular baseline
 MIN_DAYS = 120             # series quality gates
-MIN_PRICE_LEVELS = 3       # distinct non-promo price points (0.10 grid)
+MIN_PRICE_LEVELS = 3       # distinct non-promo posted prices
 MIN_RANGE = 0.04           # non-promo price range as share of mean
 CLIP = (-9.0, -0.3)        # plausible elasticity range
-TRIM = 0.2                 # trimmed-mean share for country priors
+TRIM = 0.2                 # trimmed-mean share for priors
+MIN_COUNTRY_SERIES = 5     # below this, a country uses the global prior
 
 
 def load_daily(path_or_buf) -> pd.DataFrame:
@@ -61,9 +80,24 @@ def load_daily(path_or_buf) -> pd.DataFrame:
         df["Marketplace Name"].astype(str).str.lower().map(MARKETPLACE_TO_COUNTRY)
     )
     d = df[(df["Units"] > 0) & (df["Product Sales"] > 0)].dropna(subset=["country"]).copy()
-    d["price"] = d["Product Sales"] / d["Units"]
+    implied = d["Product Sales"] / d["Units"]
+    d["implied_price"] = implied
+    # Posted price on a 0.10 grid: removes the sub-cent Sales/Units movement
+    # that shares the Units denominator with the ln(Units) regressand.
+    d["price"] = (implied / PRICE_GRID).round() * PRICE_GRID
     d["ads"] = pd.to_numeric(d["Advertising Costs"], errors="coerce").abs().fillna(0)
-    return d[["country", "SKU", "Child ASIN", "Period", "Units", "price", "ads"]]
+    d = d[d["price"] > 0]
+    return d[["country", "SKU", "Child ASIN", "Period", "Units", "price",
+              "implied_price", "ads"]]
+
+
+def drop_price_outliers(d: pd.DataFrame) -> pd.DataFrame:
+    """Drop days whose implied price is far from the series median (bundles,
+    mis-recorded revenue). A single such day would otherwise both inflate the
+    (max-min)/mean range gate and act as a high-leverage point in the fit."""
+    med = d.groupby(["country", "SKU"])["implied_price"].transform("median")
+    keep = np.log(d["implied_price"] / med).abs() <= OUTLIER_LOG
+    return d[keep].copy()
 
 
 def flag_promo_days(d: pd.DataFrame) -> pd.DataFrame:
@@ -74,13 +108,24 @@ def flag_promo_days(d: pd.DataFrame) -> pd.DataFrame:
     n_attr = 0
     if promos_path.exists():
         promos = pd.read_csv(promos_path, parse_dates=["start", "end"])
+        # Coerce promo_price to numeric (handles comma decimals / stray symbols)
+        # so a string dtype cannot crash the comparison or the FX arithmetic.
+        promos["promo_price"] = pd.to_numeric(
+            promos["promo_price"].astype(str).str.replace(",", ".", regex=False),
+            errors="coerce",
+        )
         promos = promos[
             promos["promotion_type"].isin(["Best Deal", "Price Discount", "Sales Discount"])
             & (promos["promo_price"] > 0)
+            & promos["start"].notna()
+            & promos["end"].notna()
         ]
+        # Normalize ASIN keys on both sides (whitespace/case) before matching.
+        d["asin_key"] = d["Child ASIN"].astype(str).str.strip().str.upper()
         for _, p in promos.iterrows():
+            asin = str(p["asin"]).strip().upper()
             win = d[
-                (d["Child ASIN"] == p["asin"])
+                (d["asin_key"] == asin)
                 & (d["Period"] >= p["start"].normalize())
                 & (d["Period"] <= p["end"].normalize())
             ]
@@ -92,19 +137,35 @@ def flag_promo_days(d: pd.DataFrame) -> pd.DataFrame:
                 if abs(price / target - 1) <= PROMO_PRICE_TOL:
                     d.loc[win[win["country"] == country].index, "promo"] = True
                     n_attr += 1
+        d = d.drop(columns="asin_key")
     print(f"promo windows attributed to marketplaces: {n_attr}")
 
-    # Inferred dips vs centered rolling median (fallback for unreported promos).
-    med = (
-        d.groupby(["country", "SKU"])["price"]
-        .transform(lambda s: s.rolling(28, center=True, min_periods=7).median())
-    )
-    d["promo"] |= d["price"] <= DIP_THRESHOLD * med
+    # Regular-price baseline: trailing 35-calendar-day median of the
+    # report-non-promo prices only. Excluding already-flagged promo days stops a
+    # sustained promo from pulling its own baseline down; the calendar window
+    # keeps the reference meaningful for sparse-sales SKUs.
+    def _regular(g: pd.DataFrame) -> pd.Series:
+        ser = pd.Series(
+            g["price"].where(~g["promo"]).to_numpy(dtype=float),
+            index=pd.DatetimeIndex(g["Period"]),
+        )
+        ref = ser.rolling(DIP_WINDOW, min_periods=DIP_MIN_OBS).median()
+        return pd.Series(ref.to_numpy(), index=g.index)
+
+    d["regular"] = d.groupby(["country", "SKU"], group_keys=False).apply(_regular)
+    d["promo"] = d["promo"] | (d["price"] <= DIP_THRESHOLD * d["regular"])
     print(f"promo-flagged sale days: {d['promo'].sum()} of {len(d)} ({d['promo'].mean():.1%})")
-    return d
+    return d.drop(columns="regular")
 
 
 def fit_series(sub: pd.DataFrame) -> tuple[float, float] | None:
+    """Log-log OLS via SVD with a rank check.
+
+    Returns (elasticity, se) or None when the design is rank-deficient (the
+    price coefficient is not identified). The SE is derived from the same SVD,
+    so a near-collinear price column produces a large SE rather than the
+    deflated one that pinv(X.T@X) with a mismatched cutoff would give.
+    """
     y = np.log(sub["Units"].to_numpy(dtype=float))
     mo = pd.get_dummies(sub["Period"].dt.month, drop_first=True, dtype=float)
     dw = pd.get_dummies(sub["Period"].dt.dayofweek, drop_first=True, dtype=float)
@@ -118,21 +179,44 @@ def fit_series(sub: pd.DataFrame) -> tuple[float, float] | None:
             dw.to_numpy(),
         ]
     )
-    if len(y) <= X.shape[1] + 10:
+    n, p = X.shape
+    if n <= p + 10:
         return None
-    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    U, s, Vt = np.linalg.svd(X, full_matrices=False)
+    if s.size == 0:
+        return None
+    tol = max(n, p) * np.finfo(float).eps * s[0]
+    if s[-1] <= tol:
+        return None  # rank-deficient → price effect not separately identified
+    beta = Vt.T @ ((U.T @ y) / s)
     resid = y - X @ beta
-    with np.errstate(invalid="ignore"):
-        se = np.sqrt(
-            np.diag(np.linalg.pinv(X.T @ X)) * (resid @ resid) / (len(y) - X.shape[1])
-        )
-    return float(beta[1]), float(se[1])
+    sigma2 = float(resid @ resid) / (n - p)
+    # diag((X'X)^-1)_j = sum_k V[j,k]^2 / s_k^2
+    cov_diag = (Vt.T ** 2) @ (1.0 / s ** 2) * sigma2
+    return float(beta[1]), float(np.sqrt(cov_diag[1]))
 
 
 def trimmed_mean(values: np.ndarray, trim: float = TRIM) -> float:
     v = np.sort(values)
     k = int(len(v) * trim)
     return float(v[k : len(v) - k].mean()) if len(v) > 2 * k else float(v.mean())
+
+
+def _prior(raws: np.ndarray, ses: np.ndarray) -> tuple[float, float]:
+    """Empirical-Bayes (mu, tau2) from a set of raw estimates. Uses the
+    unbiased sample variance (ddof=1) for the between-series component."""
+    mu = trimmed_mean(raws)
+    var = float(np.var(raws, ddof=1)) if len(raws) > 1 else 1.0
+    tau2 = max(var - float(np.mean(ses ** 2)), 0.05)
+    return mu, tau2
+
+
+def _confidence(raw: float, se: float, w: float, pooled: bool) -> str:
+    if raw >= 0 or pooled or se >= 2.0 or w < 0.3:
+        return "low"
+    if w >= 0.7 and se < 0.6:
+        return "high"
+    return "medium"
 
 
 def main() -> None:
@@ -145,8 +229,11 @@ def main() -> None:
         resp.raise_for_status()
         d = load_daily(io.BytesIO(resp.content))
 
+    d = drop_price_outliers(d)
     d = flag_promo_days(d)
 
+    cols = ["country", "sku", "elasticity_raw", "se", "days", "promo_days",
+            "elasticity", "method", "confidence"]
     rows = []
     for (country, sku), sub in d.groupby(["country", "SKU"]):
         nonpromo = sub[~sub["promo"]]
@@ -159,42 +246,55 @@ def main() -> None:
         fit = fit_series(sub)
         if fit is None or not np.isfinite(fit[0]) or not np.isfinite(fit[1]) or fit[1] <= 0:
             continue
-        rows.append(
-            {
-                "country": country, "sku": sku, "elasticity_raw": fit[0],
-                "se": fit[1], "days": len(sub), "promo_days": int(sub["promo"].sum()),
-            }
-        )
+        rows.append({
+            "country": country, "sku": sku, "elasticity_raw": fit[0],
+            "se": fit[1], "days": len(sub), "promo_days": int(sub["promo"].sum()),
+        })
     est = pd.DataFrame(rows)
     print(f"series estimated: {len(est)}")
+    if est.empty:
+        pd.DataFrame(columns=cols).to_csv(DATA_DIR / "elasticity.csv", index=False)
+        return
 
-    # Precision-weighted shrinkage toward the country's trimmed mean.
+    # Global prior fallback for marketplaces with too few usable series.
+    usable_all = est[(est["elasticity_raw"] < 0) & (est["se"] < 3)]
+    if len(usable_all) >= MIN_COUNTRY_SERIES:
+        g_mu, g_tau2 = _prior(usable_all["elasticity_raw"].to_numpy(),
+                              usable_all["se"].to_numpy())
+    else:
+        g_mu, g_tau2 = -2.0, 1.0
+
     out = []
     for country, grp in est.groupby("country"):
         usable = grp[(grp["elasticity_raw"] < 0) & (grp["se"] < 3)]
-        mu = trimmed_mean(usable["elasticity_raw"].to_numpy()) if len(usable) >= 5 else -3.0
-        tau2 = max(float(np.var(usable["elasticity_raw"])) - float(np.mean(usable["se"] ** 2)), 0.05) \
-            if len(usable) >= 5 else 1.0
+        pooled = len(usable) < MIN_COUNTRY_SERIES
+        mu, tau2 = (g_mu, g_tau2) if pooled else _prior(
+            usable["elasticity_raw"].to_numpy(), usable["se"].to_numpy()
+        )
         for _, r in grp.iterrows():
             w = (1 / r["se"] ** 2) / (1 / r["se"] ** 2 + 1 / tau2)
-            shrunk = w * r["elasticity_raw"] + (1 - w) * mu
-            out.append(
-                {
-                    **r,
-                    "elasticity": float(np.clip(shrunk, *CLIP)),
-                    "method": "estimated",
-                }
-            )
-        out.append(
-            {
-                "country": country, "sku": "_default",
-                "elasticity_raw": mu, "se": np.nan, "days": 0, "promo_days": 0,
-                "elasticity": float(np.clip(mu, *CLIP)), "method": "country-default",
-            }
-        )
-    res = pd.DataFrame(out).sort_values(["country", "sku"])
+            if r["elasticity_raw"] >= 0:
+                # Wrong sign = no demand response identified: use the prior,
+                # don't clip a positive raw up to -0.3 and call it estimated.
+                elasticity, method = float(np.clip(mu, *CLIP)), "prior-fallback"
+            else:
+                shrunk = w * r["elasticity_raw"] + (1 - w) * mu
+                elasticity, method = float(np.clip(shrunk, *CLIP)), "estimated"
+            out.append({
+                **r, "elasticity": elasticity, "method": method,
+                "confidence": _confidence(r["elasticity_raw"], r["se"], w, pooled),
+            })
+        out.append({
+            "country": country, "sku": "_default", "elasticity_raw": mu,
+            "se": np.nan, "days": 0, "promo_days": 0,
+            "elasticity": float(np.clip(mu, *CLIP)),
+            "method": "global-prior" if pooled else "country-default",
+            "confidence": "low",
+        })
+    res = pd.DataFrame(out)[cols].sort_values(["country", "sku"])
     res.to_csv(DATA_DIR / "elasticity.csv", index=False)
-    summary = res[res["method"] == "estimated"].groupby("country")["elasticity"].agg(["count", "median"])
+    est_mask = res["method"] == "estimated"
+    summary = res[est_mask].groupby("country")["elasticity"].agg(["count", "median"])
     print(summary.round(2).to_string())
 
     meta_path = DATA_DIR / "metadata.json"
@@ -202,11 +302,12 @@ def main() -> None:
     meta["elasticity"] = {
         "source": "Novadata daily export (12m) + Seller Central promotions report",
         "method": (
-            "log-log OLS per SKU x marketplace with promo-day, ad-spend and "
-            "seasonality controls; precision-weighted shrinkage to country "
-            "trimmed mean; everyday elasticity (promo lift modelled separately)"
+            "log-log OLS (SVD + rank check) per SKU x marketplace on posted "
+            "price (0.10 grid) with promo-day, ad-spend and seasonality "
+            "controls; empirical-Bayes shrinkage to country/global prior; "
+            "wrong-sign fits fall back to prior; associational, not causal"
         ),
-        "estimated_series": int((res["method"] == "estimated").sum()),
+        "estimated_series": int(est_mask.sum()),
         "generated": pd.Timestamp.today().date().isoformat(),
     }
     meta_path.write_text(json.dumps(meta, indent=2) + "\n")

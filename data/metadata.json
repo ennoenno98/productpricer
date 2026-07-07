@@ -9,8 +9,8 @@
   },
   "elasticity": {
     "source": "Novadata daily export (12m) + Seller Central promotions report",
-    "method": "log-log OLS per SKU x marketplace with promo-day, ad-spend and seasonality controls; precision-weighted shrinkage to country trimmed mean; everyday elasticity (promo lift modelled separately)",
-    "estimated_series": 829,
-    "generated": "2026-06-10"
+    "method": "log-log OLS (SVD + rank check) per SKU x marketplace on posted price (0.10 grid) with promo-day, ad-spend and seasonality controls; empirical-Bayes shrinkage to country/global prior; wrong-sign fits fall back to prior; associational, not causal",
+    "estimated_series": 603,
+    "generated": "2026-07-07"
   }
 }

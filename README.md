@@ -26,17 +26,29 @@ live. Modelled on the *"Margen Calc AMZ"* sheet of `Margin_Check_V5.xlsx`.
 ## Price elasticity (`data/elasticity.csv`)
 
 `estimate_elasticity.py` estimates everyday price elasticity per SKU ×
-marketplace from 12 months of daily Novadata sales: log-log OLS of units on
-implied price with controls for **promo days**, ad spend, month and weekday.
+marketplace from 12 months of daily Novadata sales: log-log OLS of units on the
+**posted price** (implied price `Sales/Units` rounded to a 0.10 grid, so
+within-day order-mix noise in the shared `Units` term doesn't bias the slope)
+with controls for **promo days**, ad spend, month and weekday. The fit is
+solved via SVD with a rank check — rank-deficient (unidentified) series are
+dropped, and standard errors come from the same decomposition, so a
+near-collinear price column is caught rather than passed off as precise.
+Extreme implied-price days (bundles/mis-recorded revenue) are dropped first.
+
 Promo days come from the Seller Central promotions report
-(`extract_promotions.py` → `data/promotions.csv`; ASINs recovered from the
-report's HYPERLINK formulas, marketplaces attributed by matching promo prices
-to the daily implied price) plus inferred price dips (≤93% of the rolling
-median). Separating promo days matters: raw elasticities run ≈ −4 median, but
-everyday elasticity — the right number for permanent price changes — is
-≈ −1.5 to −4 by country (829 SKU-series estimated). Estimates are shrunk
-toward the country's trimmed mean (precision-weighted) and clipped to
-[−9, −0.3]; SKUs without their own estimate use the country default.
+(`extract_promotions.py` → `data/promotions.csv`) plus inferred price dips
+(≤93% of a trailing 35-**calendar**-day median of non-promo prices, so a
+sustained promo can't mask itself). Estimates are shrunk (empirical Bayes)
+toward the country trimmed-mean prior, or a **global** prior for marketplaces
+with too few series. Wrong-sign (≥0) fits fall back to the prior and are marked
+low confidence — they are **not** clipped up to −0.3 and reported as estimated.
+Every row carries a `confidence` flag (high/medium/low); most SKUs land at
+`low`, honestly reflecting that daily list prices barely move.
+
+**These are associational, not causal, elasticities** — price is observational
+(set in response to demand). Treat them as directional; validate with a real
+price test before large moves. `data/elasticity.csv` is cache-keyed on its
+mtime, so re-running the script refreshes the live app.
 
 Re-run after major assortment/price changes:
 `python estimate_elasticity.py` (downloads the Novadata export) — or pass

@@ -500,11 +500,21 @@ def spend_period_label() -> str:
 
 
 @st.cache_data(show_spinner=False)
-def load_elasticity() -> pd.DataFrame | None:
+def _load_elasticity_cached(mtime: float) -> pd.DataFrame | None:
     try:
         return pd.read_csv(DATA_DIR / "elasticity.csv")
     except Exception:
         return None
+
+
+def load_elasticity() -> pd.DataFrame | None:
+    # Key the cache on the file's mtime so regenerating elasticity.csv
+    # (estimate_elasticity.py) invalidates it instead of serving a stale copy.
+    try:
+        mtime = (DATA_DIR / "elasticity.csv").stat().st_mtime
+    except OSError:
+        return None
+    return _load_elasticity_cached(mtime)
 
 
 def attach_elasticity(df: pd.DataFrame) -> pd.DataFrame:
@@ -514,14 +524,21 @@ def attach_elasticity(df: pd.DataFrame) -> pd.DataFrame:
     if el is None:
         df["elasticity"] = np.nan
         df["elasticity_method"] = "none"
+        df["elasticity_confidence"] = "n/a"
         return df
-    sku_level = el[el["sku"] != "_default"][["country", "sku", "elasticity"]]
+    if "confidence" not in el.columns:
+        el["confidence"] = "low"
+    sku_level = el[el["sku"] != "_default"][["country", "sku", "elasticity", "confidence"]]
     defaults = (
         el[el["sku"] == "_default"].set_index("country")["elasticity"].to_dict()
     )
-    overall = float(np.median(list(defaults.values()))) if defaults else -3.0
+    overall = float(np.nanmedian(list(defaults.values()))) if defaults else -3.0
+    if not np.isfinite(overall):
+        overall = -3.0
     df = df.merge(sku_level, on=["country", "sku"], how="left")
     df["elasticity_method"] = np.where(df["elasticity"].notna(), "estimated", "country-default")
+    df["elasticity_confidence"] = df["confidence"].fillna("low")
+    df = df.drop(columns="confidence")
     df["elasticity"] = df["elasticity"].fillna(
         df["country"].map(defaults).fillna(overall)
     )
@@ -765,10 +782,14 @@ with tab_sheet:
     # Volume-weighted impact: units sold in the ad-spend window. With the
     # elasticity toggle on, volume scales as (new/current price)^elasticity.
     if use_elasticity:
-        ratio = (base["new_price"] / base["current_price"]).where(
-            base["current_price"] > 0, 1.0
-        )
-        base["units_new"] = base["units_window"] * ratio ** base["elasticity"]
+        # Only apply the elasticity response when both prices are positive; a
+        # 0 price would give 0 ** (negative elasticity) = inf and blow up the
+        # portfolio totals. Clamp the multiplier to a sane band as a backstop.
+        valid = (base["current_price"] > 0) & (base["new_price"] > 0)
+        ratio = (base["new_price"] / base["current_price"]).where(valid, 1.0)
+        vol_mult = (ratio ** base["elasticity"]).replace([np.inf, -np.inf], np.nan)
+        vol_mult = vol_mult.fillna(1.0).clip(lower=0.0, upper=100.0)
+        base["units_new"] = base["units_window"] * vol_mult
     else:
         base["units_new"] = base["units_window"]
     base["profit_delta"] = (
@@ -1144,15 +1165,20 @@ with tab_calc:
         )
     st.markdown(f"<div class='pp-cards'>{''.join(cards)}</div>", unsafe_allow_html=True)
 
-    if use_elasticity and pd.notna(r.get("elasticity")) and row["current_price"] > 0:
+    if (
+        use_elasticity and pd.notna(r.get("elasticity"))
+        and row["current_price"] > 0 and target_price > 0
+    ):
         _ratio = target_price / row["current_price"]
         _vol = _ratio ** r["elasticity"]
         _units0 = float(row.get("units_window", 0) or 0)
         _delta_total = r["cm3"] * _units0 * _vol - r["cm3_cur"] * _units0
+        _conf = row.get("elasticity_confidence", "")
+        _conf_txt = f", {_conf} confidence" if _conf and _conf not in ("n/a", "") else ""
         st.caption(
             f"Volume response: elasticity {r['elasticity']:.2f} "
-            f"({row['elasticity_method']}) → price {_ratio - 1:+.1%} ⇒ volume "
-            f"{_vol - 1:+.1%} · at {_units0:.0f} units sold in the window, "
+            f"({row['elasticity_method']}{_conf_txt}) → price {_ratio - 1:+.1%} ⇒ "
+            f"volume {_vol - 1:+.1%} · at {_units0:.0f} units sold in the window, "
             f"total CM3 changes by {cur}{_delta_total:+,.0f}."
         )
 
