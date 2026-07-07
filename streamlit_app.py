@@ -582,6 +582,29 @@ def compute_margins(df: pd.DataFrame, price_col: str, vat: float, suffix: str) -
 # ---------- UI ----------
 require_login()
 
+st.markdown(
+    """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Literata:ital,wght@0,400;0,500;0,600;1,500&display=swap');
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap');
+:root { --vana-plum:#3c1826; --vana-orange:#ff5c3e; }
+html, body, [class*="css"], .stMarkdown, .stDataFrame, button, input, textarea, select,
+[data-testid="stMetricLabel"] {
+  font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+h1, h2, h3, [data-testid="stMetricValue"] {
+  font-family: 'Literata', Georgia, 'Times New Roman', serif !important;
+  letter-spacing: -.01em;
+}
+h1 { color: var(--vana-plum); font-weight: 600; }
+[data-testid="stMetricValue"] { color: var(--vana-plum); }
+/* selected tab in the brand accent */
+[data-baseweb="tab-list"] [aria-selected="true"] { color: var(--vana-orange) !important; }
+[data-baseweb="tab-highlight"] { background-color: var(--vana-orange) !important; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
 st.title("💶 Product Pricer — Amazon")
 
 with st.sidebar:
@@ -847,14 +870,14 @@ with tab_sheet:
             if pd.isna(v):
                 return ""
             return (
-                "background-color: #DEEDD3" if v >= target
-                else "background-color: #FBDBD7"
+                "background-color: #E4F2EA" if v >= target
+                else "background-color: #FBE5E5"
             )
         return _color
 
     styled = (
         show.style
-        .set_properties(subset=SCENARIO_COLS, **{"background-color": "#EFF5FF"})
+        .set_properties(subset=SCENARIO_COLS, **{"background-color": "#E3EEF6"})
         .map(_vs_target(cm1_target), subset=["cm1_pct"])
         .map(_vs_target(cm2_target), subset=["cm2_pct"])
         .map(_vs_target(cm3_target), subset=["cm3_pct"])
@@ -1028,39 +1051,39 @@ with tab_sheet:
 # ===== Tab 2: single-product calculator (scenario vs plan) =====
 CALC_CSS = """
 <style>
-.pp-head { color:#6b7280; font-size:0.72rem; letter-spacing:0.08em;
+.pp-head { color:#8a7680; font-size:0.72rem; letter-spacing:0.08em;
   text-transform:uppercase; font-weight:600; margin:0.8rem 0 0.4rem 0; }
 .pp-cards { display:flex; gap:12px; margin:0.2rem 0 0.6rem 0; }
-.pp-card { flex:1; border:1px solid #e5e7eb; border-radius:12px;
+.pp-card { flex:1; border:1px solid #ece2e6; border-radius:12px;
   padding:12px 14px; background:#fff; }
 .pp-card .lbl { display:flex; justify-content:space-between;
-  color:#6b7280; font-size:0.78rem; font-weight:600; }
+  color:#8a7680; font-size:0.78rem; font-weight:600; }
 .pp-card .val { font-size:1.6rem; font-weight:700; margin:2px 0; }
 .pp-chip { display:inline-block; border-radius:999px; padding:1px 9px;
   font-size:0.72rem; font-weight:600; white-space:nowrap; }
-.pp-g { background:#e6f4ea; color:#137333; }
-.pp-a { background:#fef7e0; color:#b06000; }
-.pp-r { background:#fce8e6; color:#c5221f; }
-.pp-bar { height:5px; border-radius:3px; background:#f1f3f4;
+.pp-g { background:#e4f2ea; color:#1e8f5a; }
+.pp-a { background:#fbf1dc; color:#d98a00; }
+.pp-r { background:#fbe5e5; color:#d64545; }
+.pp-bar { height:5px; border-radius:3px; background:#f0e9ec;
   margin-top:8px; overflow:hidden; }
 .pp-bar div { height:100%; border-radius:3px; }
 .pp-tbl { width:100%; border-collapse:collapse; font-size:0.85rem; }
-.pp-tbl th { color:#6b7280; font-size:0.7rem; letter-spacing:0.06em;
+.pp-tbl th { color:#8a7680; font-size:0.7rem; letter-spacing:0.06em;
   text-transform:uppercase; text-align:right; font-weight:600;
-  padding:6px 10px; border-bottom:1px solid #e5e7eb; }
+  padding:6px 10px; border-bottom:1px solid #ece2e6; }
 .pp-tbl th:first-child, .pp-tbl td:first-child { text-align:left; }
 .pp-tbl th:last-child, .pp-tbl td:last-child { text-align:left; }
-.pp-tbl td { padding:7px 10px; border-bottom:1px solid #f3f4f6;
-  text-align:right; color:#374151; }
-.pp-tbl tr.sub td { background:#f7f9fc; font-weight:700; color:#111827; }
-.pp-tbl th.cur, .pp-tbl td.cur { background:#f3f4f6; }
-.pp-tbl th.sc, .pp-tbl td.sc { background:#eff5ff; }
-.pp-tbl th.cur { color:#4b5563; }
-.pp-tbl th.sc { color:#1d4ed8; }
-.pp-tbl tr.sub td.cur { background:#e9ebef; }
-.pp-tbl tr.sub td.sc { background:#dfeafd; }
-.pp-rc { color:#6b7280; font-size:0.78rem; }
-.pp-rc b { color:#374151; }
+.pp-tbl td { padding:7px 10px; border-bottom:1px solid #fbf7f2;
+  text-align:right; color:#5b4650; }
+.pp-tbl tr.sub td { background:#f4edf0; font-weight:700; color:#3c1826; }
+.pp-tbl th.cur, .pp-tbl td.cur { background:#fbf7f2; }
+.pp-tbl th.sc, .pp-tbl td.sc { background:#e3eef6; }
+.pp-tbl th.cur { color:#7a6670; }
+.pp-tbl th.sc { color:#c53a20; }
+.pp-tbl tr.sub td.cur { background:#f1e9ec; }
+.pp-tbl tr.sub td.sc { background:#d8e6f1; }
+.pp-rc { color:#8a7680; font-size:0.78rem; }
+.pp-rc b { color:#5b4650; }
 </style>
 """
 
@@ -1110,7 +1133,7 @@ with tab_calc:
     )
     with c3:
         st.markdown(
-            f"<div style='text-align:right; color:#6b7280; font-size:0.78rem; "
+            f"<div style='text-align:right; color:#8a7680; font-size:0.78rem; "
             f"padding-top:1.9rem;'>VAT {vat * 100:.1f}% · CM2 ≥ "
             f"{calc_cm2_target * 100:.1f}% · CM3 ≥ {calc_cm3_target * 100:.1f}%"
             f"<br>{target_month if plan_month else 'full year'} · AP26</div>",
@@ -1152,8 +1175,8 @@ with tab_calc:
         pct = float(pct) if pd.notna(pct) else float("nan")
         gap_pp = (pct - tgt) * 100
         tone = _gap_tone(gap_pp)
-        color = {"g": "#137333", "a": "#b06000", "r": "#c5221f"}[tone]
-        bar = {"g": "#34a853", "a": "#fbbc04", "r": "#ea4335"}[tone]
+        color = {"g": "#1e8f5a", "a": "#d98a00", "r": "#d64545"}[tone]
+        bar = {"g": "#1e8f5a", "a": "#d98a00", "r": "#d64545"}[tone]
         width = max(min(pct / tgt, 1.0), 0.0) * 100 if tgt > 0 and pd.notna(pct) else 0
         cards.append(
             f"<div class='pp-card'><div class='lbl'><span>{name.upper()}</span>"
@@ -1434,7 +1457,7 @@ with tab_fees:
                     x=top["fba_delta"][::-1],
                     orientation="h",
                     marker_color=[
-                        "#C00000" if v > 0 else "#70AD47" for v in top["fba_delta"][::-1]
+                        "#D64545" if v > 0 else "#1E8F5A" for v in top["fba_delta"][::-1]
                     ],
                     text=[f"{v:+.2f}" for v in top["fba_delta"][::-1]],
                     textposition="outside",
@@ -1462,7 +1485,7 @@ with tab_fees:
         def _delta_color(v):
             if pd.isna(v) or abs(v) < 0.005:
                 return ""
-            return "background-color: #FBDBD7" if v > 0 else "background-color: #DEEDD3"
+            return "background-color: #FBE5E5" if v > 0 else "background-color: #E4F2EA"
 
         st.dataframe(
             show_fees.style.map(_delta_color, subset=["fba_delta", "fba_delta_pct"]),
