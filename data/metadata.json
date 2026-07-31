@@ -2,9 +2,9 @@
   "marketing_spend": {
     "source": "Novadata daily margin export (Amazon Ads spend, auto-updated)",
     "window": "trailing 90 days",
-    "export_date": "2026-07-30",
-    "period_start": "2026-05-01",
-    "period_end": "2026-07-30",
+    "export_date": "2026-07-31",
+    "period_start": "2026-05-02",
+    "period_end": "2026-07-31",
     "note": "Spend per unit = total ad spend / total units ordered over the window, per SKU x marketplace. Refreshed daily by the update_marketing_spend GitHub Actions workflow. SKUs with spend but zero units are treated as having no per-unit spend."
   },
   "elasticity": {
