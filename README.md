@@ -60,6 +60,16 @@ Re-run after major assortment/price changes:
   the plan (e.g. BE) fall back to the plan average. VAT is **fixed per
   country** (food-supplement rates), not a user input.
 - **Adjustable assumptions** (sidebar): EUR→GBP rate.
+- **New product tab** — price a SKU that isn't live yet. Enter its **COGS**,
+  pick a **form factor** (the Amazon **FBA fee is estimated** from comparable
+  live products, `data/fba_form_factors.csv`, editable), choose the margin bar
+  (**country plan** or **brand plan** from the AP26 `PnL per Brand`,
+  `data/brand_targets.json`), and the tool solves the **price required in each
+  country** to hit CM2/GP2 and CM3/GP3. Optional **anchor price** gives a
+  go/no-go verdict; a detail panel shows the margin waterfall, ad headroom and
+  break-even COGS at any test price. Referral is the flat 15%; VAT is fixed;
+  COGS is the input; only FBA carries (small) estimation uncertainty.
+  Regenerate the FBA lookup with `python build_fba_lut.py`.
 - **FBA fee changes tab** — always compares the two newest fee report versions
   in `data/fee_history/` (dated snapshots; the versions being compared are
   named in the tab). When a report is uploaded in the sidebar, the comparison
