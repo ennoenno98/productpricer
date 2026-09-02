@@ -1576,10 +1576,10 @@ with tab_new:
                                  help="Amazon referral fee. Supplements are a flat 15%.") / 100
         basis = st.radio(
             "Hold to",
-            ["Country plan", "Brand plan"],
+            ["Brand plan", "Country plan"],
             horizontal=True,
-            help="Country plan = the company's per-country CM targets. Brand "
-                 "plan = the AP26 brand GP targets (e.g. Wowtamins runs richer).",
+            help="Brand plan = the AP26 brand GP targets (e.g. Wowtamins runs "
+                 "richer). Country plan = the company's per-country CM targets.",
         )
     with c3:
         np_brand = st.selectbox(
@@ -1606,7 +1606,8 @@ with tab_new:
         gp2_t = gp3_t = None  # per-country below
         bar_label = "Country plan (per-country CM2 / CM3)"
     st.caption(f"Target basis: **{bar_label}**. Referral {np_ref*100:.1f}%, "
-               f"COGS €{np_cogs:.2f}. FBA is estimated per country from “{np_form}”.")
+               f"COGS €{np_cogs:.2f}. FBA is estimated per country from “{np_form}”. "
+               "All prices are **gross** (the VAT-inclusive sale price a customer pays).")
 
     rows = []
     gb_fx = eur_to_gbp
@@ -1652,10 +1653,10 @@ with tab_new:
                 "vat": st.column_config.NumberColumn("VAT %", format="%.1f"),
                 "fba": st.column_config.NumberColumn("FBA ≈", format="%.2f",
                     help="Estimated fulfilment fee from comparable products"),
-                "price_cm2": st.column_config.NumberColumn("Price for CM2/GP2", format="%.2f"),
-                "price_cm3": st.column_config.NumberColumn("Price for CM3/GP3", format="%.2f"),
-                "required": st.column_config.NumberColumn("Required price", format="%.2f",
-                    help="The higher of the two targets, in the marketplace currency"),
+                "price_cm2": st.column_config.NumberColumn("CM2/GP2 price (gross)", format="%.2f"),
+                "price_cm3": st.column_config.NumberColumn("CM3/GP3 price (gross)", format="%.2f"),
+                "required": st.column_config.NumberColumn("Required price (gross)", format="%.2f",
+                    help="Gross (VAT-incl) sale price meeting the higher of the two targets"),
                 "anchor": st.column_config.NumberColumn("Anchor", format="%.2f"),
                 "verdict": st.column_config.TextColumn("vs anchor"),
             },
@@ -1678,7 +1679,7 @@ with tab_new:
         with d2:
             default_p = float(drow["required"]) if np.isfinite(drow["required"]) else 20.0
             det_price = st.number_input(
-                f"Price to test ({cur_d})", 0.0, 500.0, round(default_p, 2), 0.1)
+                f"Gross price to test ({cur_d})", 0.0, 500.0, round(default_p, 2), 0.1)
         vat_d = drow["vat"] / 100
         fba_d = drow["fba"]
         cogs_d = np_cogs * gb_fx if det_c == "GB" else np_cogs
