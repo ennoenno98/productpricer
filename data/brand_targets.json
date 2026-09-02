@@ -1,0 +1,26 @@
+{
+  "source": "AP26_PnL_H1ACT_H2Refor_JulyACT.xlsx — 'PnL per Brand' (full year, % of Net Sales)",
+  "note": "Brand GP levels are full-P&L across all channels; GP1 (after COGS) and GP2 (after fulfilment + Amazon fees) are the most comparable to the tool's Amazon CM1/CM2. GP3 also nets demand generation + non-working marketing, so it sits below the tool's per-unit CM3.",
+  "brands": {
+    "Wowtamins": {
+      "gp1": 0.77,
+      "gp2": 0.528,
+      "gp3": 0.237
+    },
+    "Vegavero": {
+      "gp1": 0.694,
+      "gp2": 0.344,
+      "gp3": 0.122
+    },
+    "Jasnum": {
+      "gp1": 0.65,
+      "gp2": 0.396,
+      "gp3": 0.396
+    },
+    "Vanatari (company)": {
+      "gp1": 0.703,
+      "gp2": 0.367,
+      "gp3": 0.138
+    }
+  }
+}
