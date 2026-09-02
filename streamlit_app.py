@@ -476,6 +476,37 @@ def load_targets() -> dict:
     return json.loads((DATA_DIR / "targets.json").read_text())
 
 
+@st.cache_data(show_spinner=False)
+def load_brand_targets() -> dict:
+    """Brand GP1/GP2/GP3 targets from the AP26 'PnL per Brand' sheet."""
+    try:
+        return json.loads((DATA_DIR / "brand_targets.json").read_text())
+    except Exception:
+        return {"brands": {}}
+
+
+@st.cache_data(show_spinner=False)
+def load_fba_lut() -> pd.DataFrame:
+    """Form-factor x marketplace FBA fee lookup (median of catalog fees)."""
+    try:
+        return pd.read_csv(DATA_DIR / "fba_form_factors.csv", index_col=0)
+    except Exception:
+        return pd.DataFrame()
+
+
+def required_price(cogs: float, fba: float, vat: float, ref_rate: float,
+                   target: float, ads_per_unit: float = 0.0) -> float:
+    """Gross price at which margin (net basis) hits `target`, fees scaling with price.
+
+    margin = net - cogs - fba - ref_rate*gross - ads;  net = gross/(1+vat).
+    Solving margin/net = target for gross. Returns nan if the denominator is
+    non-positive (target unreachable at any price).
+    """
+    fixed = cogs + fba + ads_per_unit
+    denom = (1 - target) / (1 + vat) - ref_rate
+    return fixed / denom if denom > 0 else float("nan")
+
+
 def country_targets(country: str, month: str | None = None) -> tuple[float, float]:
     """(CM2 target, CM3 target) for a country from the AP26 plan.
 
@@ -737,8 +768,9 @@ countries = sorted(
     data["country"].unique(),
     key=lambda c: (_order.index(c) if c in _order else len(_order), c),
 )
-tab_sheet, tab_calc, tab_fees = st.tabs(
-    ["📋 Country pricing sheet", "🧮 Product calculator", "📦 FBA fee changes"]
+tab_sheet, tab_calc, tab_fees, tab_new = st.tabs(
+    ["📋 Country pricing sheet", "🧮 Product calculator", "📦 FBA fee changes",
+     "🚀 New product"]
 )
 
 
@@ -1522,3 +1554,158 @@ with tab_fees:
             mime="text/csv",
         )
 
+
+# ===== Tab 4: New product (COGS input, FBA estimated, price to hit target) =====
+with tab_new:
+    st.markdown(
+        "Price a product that isn't live yet. Enter its **COGS**, pick a "
+        "**form factor** (its Amazon FBA fee is estimated from comparable "
+        "products), choose the margin bar, and the tool solves the price you "
+        "need in each country."
+    )
+    brands = load_brand_targets().get("brands", {})
+    fba_lut = load_fba_lut()
+    forms = list(fba_lut.index) if not fba_lut.empty else ["— any (marketplace median)"]
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        np_cogs = st.number_input("COGS (€ / unit)", 0.0, 500.0, 7.30, 0.10)
+        np_form = st.selectbox("Form factor (estimates FBA)", forms)
+    with c2:
+        np_ref = st.number_input("Referral fee (%)", 0.0, 45.0, 15.0, 0.5,
+                                 help="Amazon referral fee. Supplements are a flat 15%.") / 100
+        basis = st.radio(
+            "Hold to",
+            ["Country plan", "Brand plan"],
+            horizontal=True,
+            help="Country plan = the company's per-country CM targets. Brand "
+                 "plan = the AP26 brand GP targets (e.g. Wowtamins runs richer).",
+        )
+    with c3:
+        np_brand = st.selectbox(
+            "Brand", list(brands) or ["—"],
+            index=(list(brands).index("Wowtamins") if "Wowtamins" in brands else 0),
+            disabled=basis == "Country plan",
+        )
+        np_anchor = st.number_input(
+            "Anchor / competitor price (€, optional)", 0.0, 500.0, 0.0, 0.1,
+            help="A comparable product's price. If the required price is above "
+                 "it, the product can't hit target at this COGS.",
+        )
+        np_fba_adj = st.number_input(
+            "FBA adjustment (€)", -5.0, 10.0, 0.0, 0.1,
+            help="Nudge the estimated FBA fee up/down (e.g. a heavier pack).",
+        )
+
+    # Which margin level and target value per country.
+    if basis == "Brand plan" and np_brand in brands:
+        gp2_t = brands[np_brand]["gp2"]
+        gp3_t = brands[np_brand]["gp3"]
+        bar_label = f"{np_brand} brand plan (GP2 {gp2_t*100:.1f}% · GP3 {gp3_t*100:.1f}%)"
+    else:
+        gp2_t = gp3_t = None  # per-country below
+        bar_label = "Country plan (per-country CM2 / CM3)"
+    st.caption(f"Target basis: **{bar_label}**. Referral {np_ref*100:.1f}%, "
+               f"COGS €{np_cogs:.2f}. FBA is estimated per country from “{np_form}”.")
+
+    rows = []
+    gb_fx = eur_to_gbp
+    for c in countries:
+        vat_c = VAT_RATES.get(c, 0.20)
+        # FBA estimate: form-factor value, fall back to marketplace median.
+        fba = np.nan
+        if not fba_lut.empty and c in fba_lut.columns:
+            fba = fba_lut.loc[np_form, c] if np_form in fba_lut.index else np.nan
+            if pd.isna(fba) and "— any (marketplace median)" in fba_lut.index:
+                fba = fba_lut.loc["— any (marketplace median)", c]
+        if pd.isna(fba):
+            continue
+        fba = float(fba) + np_fba_adj
+        cur_c = "£" if c == "GB" else "€"
+        # GB fees/prices are GBP; COGS is EUR -> convert to GBP for a GB listing.
+        cogs_c = np_cogs * gb_fx if c == "GB" else np_cogs
+        cc2, cc3 = (country_targets(c, plan_month) if basis == "Country plan"
+                    else (gp2_t, gp3_t))
+        p_cm2 = required_price(cogs_c, fba, vat_c, np_ref, cc2)
+        p_cm3 = required_price(cogs_c, fba, vat_c, np_ref, cc3)
+        need = max(p_cm2, p_cm3)
+        anchor_c = (np_anchor * gb_fx if c == "GB" else np_anchor) if np_anchor > 0 else np.nan
+        verdict = ""
+        if np_anchor > 0 and np.isfinite(need):
+            verdict = "🟢 fits" if need <= anchor_c + 1e-6 else "🔴 too high"
+        rows.append({
+            "country": f"{COUNTRY_NAMES.get(c, c)} ({c})", "_c": c, "cur": cur_c,
+            "vat": vat_c * 100, "fba": fba,
+            "price_cm2": p_cm2, "price_cm3": p_cm3, "required": need,
+            "anchor": anchor_c if np_anchor > 0 else np.nan, "verdict": verdict,
+        })
+    res = pd.DataFrame(rows)
+    if res.empty:
+        st.info("No FBA reference available for this form factor.")
+    else:
+        show = res[["country", "vat", "fba", "price_cm2", "price_cm3",
+                    "required", "anchor", "verdict"]]
+        st.dataframe(
+            show, hide_index=True, width="stretch",
+            column_config={
+                "country": st.column_config.TextColumn("Country"),
+                "vat": st.column_config.NumberColumn("VAT %", format="%.1f"),
+                "fba": st.column_config.NumberColumn("FBA ≈", format="%.2f",
+                    help="Estimated fulfilment fee from comparable products"),
+                "price_cm2": st.column_config.NumberColumn("Price for CM2/GP2", format="%.2f"),
+                "price_cm3": st.column_config.NumberColumn("Price for CM3/GP3", format="%.2f"),
+                "required": st.column_config.NumberColumn("Required price", format="%.2f",
+                    help="The higher of the two targets, in the marketplace currency"),
+                "anchor": st.column_config.NumberColumn("Anchor", format="%.2f"),
+                "verdict": st.column_config.TextColumn("vs anchor"),
+            },
+        )
+        st.caption(
+            "Required price is the gross price that meets **both** targets "
+            "(referral scales with price; FBA, COGS fixed). GB shown in £ with "
+            f"COGS converted at {gb_fx:.2f}. Prices are estimates until a real "
+            "FBA fee preview exists for the live listing."
+        )
+
+        # Detail: waterfall for one country at a chosen price.
+        st.markdown("##### Check a specific price")
+        d1, d2 = st.columns([1, 2])
+        with d1:
+            det_c = st.selectbox("Country", res["_c"].tolist(),
+                                 format_func=lambda c: COUNTRY_NAMES.get(c, c))
+        drow = res[res["_c"] == det_c].iloc[0]
+        cur_d = drow["cur"]
+        with d2:
+            default_p = float(drow["required"]) if np.isfinite(drow["required"]) else 20.0
+            det_price = st.number_input(
+                f"Price to test ({cur_d})", 0.0, 500.0, round(default_p, 2), 0.1)
+        vat_d = drow["vat"] / 100
+        fba_d = drow["fba"]
+        cogs_d = np_cogs * gb_fx if det_c == "GB" else np_cogs
+        cc2, cc3 = (country_targets(det_c, plan_month) if basis == "Country plan"
+                    else (gp2_t, gp3_t))
+        cm1_t = load_targets()["cm1_target"].get(det_c, 0.71) if basis == "Country plan" \
+            else brands.get(np_brand, {}).get("gp1", 0.71)
+        net = det_price / (1 + vat_d)
+        referral = det_price * np_ref
+        cm1 = net - cogs_d
+        cm2 = cm1 - fba_d - referral
+        ads_head = cm2 - cc3 * net
+        m = st.columns(4)
+        m[0].metric("Net", f"{cur_d}{net:.2f}")
+        m[1].metric("CM1 / GP1", f"{cm1/net*100:.1f}%",
+                    delta=f"{(cm1/net - cm1_t)*100:+.1f}pp vs {cm1_t*100:.0f}%")
+        m[2].metric("CM2 / GP2", f"{cm2/net*100:.1f}%",
+                    delta=f"{(cm2/net - cc2)*100:+.1f}pp vs {cc2*100:.1f}%")
+        m[3].metric("Ad headroom to CM3/GP3", f"{cur_d}{max(ads_head,0):.2f}",
+                    help=f"Per unit for ads + discounts before CM3/GP3 target "
+                         f"{cc3*100:.1f}% is breached ({max(ads_head/net,0)*100:.1f}% of net)")
+        breakeven_cogs = net * (1 - cc2) - fba_d - referral
+        be_txt = (f"{cur_d}{breakeven_cogs:.2f}" if np.isfinite(breakeven_cogs) else "—")
+        cogs_shown = cogs_d
+        st.caption(
+            f"At {cur_d}{det_price:.2f}: to still meet CM2/GP2 the COGS could be up to "
+            f"**{be_txt}** (this product: {cur_d}{cogs_shown:.2f}). "
+            + ("✅ CM2/GP2 target met." if cm2/net >= cc2 else
+               f"⚠️ CM2/GP2 short by {(cc2 - cm2/net)*100:.1f}pp — raise price or cut COGS.")
+        )
