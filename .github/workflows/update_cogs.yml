@@ -1,0 +1,45 @@
+name: Update COGS (Novadata)
+
+on:
+  schedule:
+    # Weekly, Mondays 06:30 UTC.
+    - cron: "30 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pandas requests openpyxl
+
+      - name: Refresh COGS from Novadata
+        env:
+          # Novadata data-export link that includes SKU + COGS columns.
+          # Settings -> Secrets and variables -> Actions -> New repository secret.
+          NOVADATA_COGS_EXPORT_URL: ${{ secrets.NOVADATA_COGS_EXPORT_URL }}
+        run: python update_cogs.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/cogs.csv data/metadata.json
+          if git diff --cached --quiet; then
+            echo "No changes."
+          else
+            git commit -m "Auto-update COGS from Novadata export"
+            git push
+          fi

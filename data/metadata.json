@@ -12,5 +12,14 @@
     "method": "log-log OLS (SVD + rank check) per SKU x marketplace on posted price (0.10 grid) with promo-day, ad-spend and seasonality controls; empirical-Bayes shrinkage to country/global prior; wrong-sign fits fall back to prior; associational, not causal",
     "estimated_series": 603,
     "generated": "2026-07-07"
+  },
+  "cogs": {
+    "source": "Novadata COGS (EUR), refreshed weekly by update_cogs.yml",
+    "updated": "2026-09-30",
+    "skus_from_novadata": 272,
+    "skus_derived": 105,
+    "catalog_skus_without_cogs": [
+      "T5-SR1L-UZBW"
+    ]
   }
 }

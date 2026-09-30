@@ -160,16 +160,41 @@ def _read_report(content: bytes, name: str) -> pd.DataFrame:
     return pd.read_csv(io.StringIO(text), sep=None, engine="python")
 
 
+COGS_TABLE = DATA_DIR / "cogs.csv"
+
+
+def cogs_version() -> float:
+    """mtime of data/cogs.csv — part of load_data's cache key, so the weekly
+    COGS refresh shows up without a restart."""
+    try:
+        return COGS_TABLE.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _cogs_table() -> dict[str, float]:
+    """SKU -> COGS (EUR) from data/cogs.csv, refreshed weekly from Novadata."""
+    try:
+        t = pd.read_csv(COGS_TABLE)
+    except (OSError, pd.errors.EmptyDataError):
+        return {}
+    t["cogs_eur"] = pd.to_numeric(t["cogs_eur"], errors="coerce")
+    t = t.dropna(subset=["cogs_eur"])
+    return dict(zip(t["sku"].astype(str), t["cogs_eur"]))
+
+
 @st.cache_data(show_spinner=False)
 def load_data(
-    report: bytes | None = None, report_name: str = "", snapshot: str = ""
+    report: bytes | None = None, report_name: str = "", snapshot: str = "",
+    cogs_ver: float = 0.0,
 ) -> tuple[pd.DataFrame, dict]:
     """Build the pricing dataset; an uploaded fee report replaces the committed one.
 
     `snapshot` is the latest fee_history filename (cache key + baseline source;
-    falls back to data/products.csv when no snapshots exist). Returns
-    (dataset, info); `info` describes the uploaded report merge and is empty
-    for committed data.
+    falls back to data/products.csv when no snapshots exist). `cogs_ver` is the
+    cogs.csv mtime (cache key only). COGS comes from data/cogs.csv first and
+    falls back to the COGS carried in the snapshot. Returns (dataset, info);
+    `info` describes the uploaded report merge and is empty for committed data.
     """
     base_path = DATA_DIR / "fee_history" / snapshot if snapshot else DATA_DIR / "products.csv"
     bundled = pd.read_csv(base_path).rename(columns=COLUMN_RENAMES)
@@ -215,11 +240,20 @@ def load_data(
         info = {
             "rows": len(products),
             "countries": sorted(products["country"].unique()),
-            "cogs_missing": int(_to_num(products["cogs_eur"]).isna().sum()),
         }
 
     for col in NUMERIC_COLS:
         products[col] = _to_num(products[col])
+
+    # Current COGS from the weekly Novadata table wins; the snapshot's COGS is
+    # only a fallback for SKUs the table doesn't cover.
+    cogs_tbl = _cogs_table()
+    if cogs_tbl:
+        products["cogs_eur"] = (
+            products["sku"].astype(str).map(cogs_tbl).fillna(products["cogs_eur"])
+        )
+    if info:
+        info["cogs_missing"] = int(products["cogs_eur"].isna().sum())
 
     spend = pd.read_csv(DATA_DIR / "marketing_spend.csv")
     # Marketing export uses "UK" for the GB marketplace.
@@ -711,6 +745,13 @@ with st.sidebar:
         f"**{spend_period_label()}**. "
         "Spend per unit = total ad spend ÷ total units ordered in that window."
     )
+    _cm = load_metadata().get("cogs", {})
+    if _cm:
+        st.markdown(
+            f"**COGS:** Novadata, updated **{_cm.get('updated', '?')}** (weekly). "
+            f"{_cm.get('skus_from_novadata', 0)} SKUs from Novadata, "
+            f"{_cm.get('skus_derived', 0)} multipacks/bundles derived from their parts."
+        )
 
 _snaps = fee_snapshot_files()
 _latest_snap = _snaps[-1].name if _snaps else ""
@@ -720,7 +761,8 @@ report_info = None
 if report_file is not None:
     try:
         data, report_info = load_data(
-            report_file.getvalue(), report_file.name, _latest_snap
+            report_file.getvalue(), report_file.name, _latest_snap,
+            cogs_ver=cogs_version(),
         )
     except Exception as exc:
         st.sidebar.error(f"Could not read '{report_file.name}': {exc}")
@@ -761,7 +803,7 @@ if report_file is not None:
             ),
         )
 if data is None:
-    data, _ = load_data(snapshot=_latest_snap)
+    data, _ = load_data(snapshot=_latest_snap, cogs_ver=cogs_version())
 
 _order = list(COUNTRY_NAMES)
 countries = sorted(

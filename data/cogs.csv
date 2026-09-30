@@ -1,0 +1,378 @@
+sku,cogs_eur,source
+2R-49NC-R697,4.36,novadata
+30-OZWM-94PY,7.75,novadata
+5904569253554,10.17,novadata
+5904569253578,7.41,novadata
+98-VX35-DC63-2er,6.29,novadata
+98-VX35-DC63-Neu,6.6,novadata
+9G-B3KH-DDA0-2er,4.33,novadata
+9G-B3KH-DDA0-Neu,4.16,novadata
+A0-22PS-COWR,3.58,novadata
+BJ-E223-8EKW,7.91,novadata
+CP-DQMG-RVN9,6.84,novadata
+CW-BID2-NFIP,5.26,novadata
+CW-KVIN-V39Y,4.08,novadata
+Eisen-02-2025,2.88,novadata
+Eisen-Feb-25,2.88,novadata
+FH-L1DD-WJN8,5.26,novadata
+FW-WAIL-UBVC-Neu,4.13,novadata
+Immun-Intense-1er,8.54,novadata
+KO-0JFH-PXEC,4.21,novadata
+Kids Complete zuckerfrei-alt,4.21,novadata
+MW-NLU9-BEWZ,4.84,novadata
+NB-49AE-8MWZ,4.13,novadata
+NX-CVPF-VCEZ,8.93,novadata
+OD-MZWV-JBYL,4.21,novadata
+OD-MZWV-JBYL-Neu,6.18,novadata
+OD-OAK8-N5TW-Neu,5.35,novadata
+SKU-WT-WKPz,6.97,novadata
+SKU-WT-WMGz,4.27,novadata
+TU-QNYD-JRRX,2.97,novadata
+U1-6CTS-AHGW-Neu,4.52,novadata
+VI-ZU99-SZ0B,4.11,novadata
+VMP_2R-49NC-R697_2_PK,8.72,derived: 2x 2R-49NC-R697
+VMP_CW-KVIN-V39Y_2_PK,8.16,derived: 2x CW-KVIN-V39Y
+VMP_NX-CVPF-VCEZ_2_PK,17.86,derived: 2x NX-CVPF-VCEZ
+VMP_VV-ALO-06_2_PK,9.86,derived: 2x VV-ALO-06
+VMP_VV-VITA-101_2_PK,15.64,derived: 2x VV-VITA-101
+VMP_VV-VITA-102_2_PK,12.26,derived: 2x VV-VITA-102
+VMP_VV-VITA-105_2_PK,4.28,derived: 2x VV-VITA-105
+VMP_VV-VITA-107_2_PK,6.9,derived: 2x VV-VITA-107
+VMP_VV-VITA-109_2_PK,10.26,derived: 2x VV-VITA-109
+VMP_VV-VITA-119_2_PK,10.02,derived: 2x VV-VITA-119
+VMP_VV-VITA-121_2_PK,14.6,derived: 2x VV-VITA-121
+VMP_VV-VITA-122-V_2_PK,13.98,derived: 2x VV-VITA-122-V
+VMP_VV-VITA-122_2_PK,9.62,derived: 2x VV-VITA-122
+VMP_VV-VITA-124_2_PK,17.84,derived: 2x VV-VITA-124
+VMP_VV-VITA-127_2_PK,15.36,derived: 2x VV-VITA-127
+VMP_VV-VITA-129_2_PK,8.08,derived: 2x VV-VITA-129
+VMP_VV-VITA-136_2_PK,14.3,derived: 2x VV-VITA-136
+VMP_VV-VITA-142_2_PK,17.22,derived: 2x VV-VITA-142
+VMP_VV-VITA-143_2_PK,19.2,derived: 2x VV-VITA-143
+VMP_VV-VITA-146_2_PK,13.22,derived: 2x VV-VITA-146
+VMP_VV-VITA-151_2_PK,16.22,derived: 2x VV-VITA-151
+VMP_VV-VITA-157_2_PK,9.26,derived: 2x VV-VITA-157
+VMP_VV-VITA-159_2_PK,15.76,derived: 2x VV-VITA-159
+VMP_VV-VITA-166_2_PK,11.48,derived: 2x VV-VITA-166
+VMP_VV-VITA-171_2_PK,25.5,derived: 2x VV-VITA-171
+VMP_VV-VITA-186_2_PK,14.08,derived: 2x VV-VITA-186
+VMP_VV-VITA-188_2_PK,11.42,derived: 2x VV-VITA-188
+VMP_VV-VITA-198_2_PK,14.18,derived: 2x VV-VITA-198
+VMP_VV-VITA-199_2_PK,10.68,derived: 2x VV-VITA-199
+VMP_VV-VITA-203_2_PK,11.54,derived: 2x VV-VITA-203
+VMP_VV-VITA-204_2_PK,10.28,derived: 2x VV-VITA-204
+VMP_VV-VITA-206_2_PK,10.22,derived: 2x VV-VITA-206
+VMP_VV-VITA-207_2_PK,11.48,derived: 2x VV-VITA-207
+VMP_VV-VITA-208_2_PK,15.24,derived: 2x VV-VITA-208
+VMP_VV-VITA-216_2_PK,11.16,derived: 2x VV-VITA-216
+VMP_VV-VITA-223_2_PK,17.8,derived: 2x VV-VITA-223
+VMP_VV-VITA-225_2_PK,15.26,derived: 2x VV-VITA-225
+VMP_VV-VITA-227_2_PK,13.4,derived: 2x VV-VITA-227
+VMP_VV-VITA-230_2_PK,17.44,derived: 2x VV-VITA-230
+VMP_VV-VITA-231_2_PK,14.2,derived: 2x VV-VITA-231
+VMP_VV-VITA-243_2_PK,12.74,derived: 2x VV-VITA-243
+VMP_VV-VITA-250_2_PK,10.28,derived: 2x VV-VITA-250
+VMP_VV-VITA-252_2_PK,16.1,derived: 2x VV-VITA-252
+VMP_VV-VITA-256_2_PK,16.1,derived: 2x VV-VITA-256
+VMP_VV-VITA-257_2_PK,17.3,derived: 2x VV-VITA-257
+VMP_VV-VITA-262_2_PK,16.5,derived: 2x VV-VITA-262
+VMP_VV-VITA-264_2_PK,5.76,derived: 2x VV-VITA-264
+VMP_VV-VITA-277_2_PK,6.96,derived: 2x VV-VITA-277
+VMP_VV-VITA-284_2_PK,14.84,derived: 2x VV-VITA-284
+VMP_VV-VITA-295_2_PK,11.66,derived: 2x VV-VITA-295
+VMP_VV-VITA-297_2_PK,14.34,derived: 2x VV-VITA-297
+VMP_VV-VITA-298_2_PK,12.58,derived: 2x VV-VITA-298
+VMP_VV-VITA-307_2_PK,7.42,derived: 2x VV-VITA-307
+VMP_VV-VITA-308_2_PK,14.52,derived: 2x VV-VITA-308
+VMP_VV-VITA-313_2_PK,10.52,derived: 2x VV-VITA-313
+VMP_VV-VITA-314_2_PK,6.5,derived: 2x VV-VITA-314
+VMP_VV-VITA-316_2_PK,11.94,derived: 2x VV-VITA-316
+VMP_VV-VITA-318_2_PK,9.54,derived: 2x VV-VITA-318
+VMP_VV-VITA-319_2_PK,12.04,derived: 2x VV-VITA-319
+VMP_VV-VITA-31_2_PK,11.06,derived: 2x VV-VITA-31
+VMP_VV-VITA-329_2_PK,11.48,derived: 2x VV-VITA-329
+VMP_VV-VITA-336_2_PK,10.14,derived: 2x VV-VITA-336
+VMP_VV-VITA-338_2_PK,14.02,derived: 2x VV-VITA-338
+VMP_VV-VITA-339_2_PK,13.94,derived: 2x VV-VITA-339
+VMP_VV-VITA-341_2_PK,10.54,derived: 2x VV-VITA-341
+VMP_VV-VITA-342_2_PK,13.24,derived: 2x VV-VITA-342
+VMP_VV-VITA-344_2_PK,14.82,derived: 2x VV-VITA-344
+VMP_VV-VITA-346_2_PK,5.92,derived: 2x VV-VITA-346
+VMP_VV-VITA-349_2_PK,8.64,derived: 2x VV-VITA-349
+VMP_VV-VITA-351_2_PK,10.68,derived: 2x VV-VITA-351
+VMP_VV-VITA-352_2_PK,14.72,derived: 2x VV-VITA-352
+VMP_VV-VITA-355-V_2_PK,32.32,derived: 2x VV-VITA-355-V
+VMP_VV-VITA-355_2_PK,16.86,derived: 2x VV-VITA-355
+VMP_VV-VITA-357_2_PK,7.84,derived: 2x VV-VITA-357
+VMP_VV-VITA-359_2_PK,10.98,derived: 2x VV-VITA-359
+VMP_VV-VITA-361_2_PK,10.76,derived: 2x VV-VITA-361
+VMP_VV-VITA-362_2_PK,13.02,derived: 2x VV-VITA-362
+VMP_VV-VITA-363_2_PK,10.04,derived: 2x VV-VITA-363
+VMP_VV-VITA-364_2_PK,15.96,derived: 2x VV-VITA-364
+VMP_VV-VITA-365_2_PK,6.76,derived: 2x VV-VITA-365
+VMP_VV-VITA-366_2_PK,7.42,derived: 2x VV-VITA-366
+VMP_VV-VITA-370-V_2_PK,13.7,derived: 2x VV-VITA-370-V
+VMP_VV-VITA-370_2_PK,8.0,derived: 2x VV-VITA-370
+VMP_VV-VITA-371_2_PK,9.62,derived: 2x VV-VITA-371
+VMP_VV-VITA-374_2_PK,10.72,derived: 2x VV-VITA-374
+VMP_VV-VITA-375_2_PK,9.72,derived: 2x VV-VITA-375
+VMP_VV-VITA-378_2_PK,7.68,derived: 2x VV-VITA-378
+VMP_VV-VITA-380_2_PK,5.68,derived: 2x VV-VITA-380
+VMP_VV-VITA-381_2_PK,7.18,derived: 2x VV-VITA-381
+VMP_VV-VITA-383_2_PK,10.34,derived: 2x VV-VITA-383
+VMP_VV-VITA-388_2_PK,3.34,derived: 2x VV-VITA-388
+VMP_VV-VITA-389_2_PK,19.62,derived: 2x VV-VITA-389
+VMP_VV-VITA-38_2_PK,6.46,derived: 2x VV-VITA-38
+VMP_VV-VITA-391_2_PK,14.48,derived: 2x VV-VITA-391
+VMP_VV-VITA-392_2_PK,8.78,derived: 2x VV-VITA-392
+VMP_VV-VITA-395_2_PK,12.54,derived: 2x VV-VITA-395
+VMP_VV-VITA-395_4_PK,25.08,derived: 4x VV-VITA-395
+VMP_VV-VITA-396_2_PK,4.0,derived: 2x VV-VITA-396
+VMP_VV-VITA-39_2_PK,9.94,derived: 2x VV-VITA-39
+VMP_VV-VITA-46_2_PK,12.46,derived: 2x VV-VITA-46
+VMP_VV-VITA-50_2_PK,12.76,derived: 2x VV-VITA-50
+VMP_VV-VITA-57-V2_2_PK,17.54,derived: 2x VV-VITA-57-V2
+VMP_VV-VITA-90_2_PK,12.64,derived: 2x VV-VITA-90
+VMP_VV-VITA-94_2_PK,19.0,derived: 2x VV-VITA-94
+VV-ALO-06,4.93,novadata
+VV-BUN-50+57-V2,12.63,derived: VV-VITA-50 + VV-VITA-57
+VV-VITA-02,5.28,novadata
+VV-VITA-02-V,13.02,novadata
+VV-VITA-101,7.82,novadata
+VV-VITA-102,6.13,novadata
+VV-VITA-104,5.07,novadata
+VV-VITA-105,2.14,novadata
+VV-VITA-106,7.24,novadata
+VV-VITA-107,3.45,novadata
+VV-VITA-109,5.13,novadata
+VV-VITA-111,6.07,novadata
+VV-VITA-115,7.74,novadata
+VV-VITA-116,5.1,novadata
+VV-VITA-119,5.01,novadata
+VV-VITA-121,7.3,novadata
+VV-VITA-122,4.81,novadata
+VV-VITA-122-V,6.99,novadata
+VV-VITA-124,8.92,novadata
+VV-VITA-127,7.68,novadata
+VV-VITA-129,4.04,novadata
+VV-VITA-136,7.15,novadata
+VV-VITA-142,8.61,novadata
+VV-VITA-143,9.6,novadata
+VV-VITA-146,6.61,novadata
+VV-VITA-151,8.11,novadata
+VV-VITA-153,5.22,novadata
+VV-VITA-155,5.35,novadata
+VV-VITA-157,4.63,novadata
+VV-VITA-158,8.51,novadata
+VV-VITA-159,7.88,novadata
+VV-VITA-160,6.88,novadata
+VV-VITA-161,6.83,novadata
+VV-VITA-163,4.4,novadata
+VV-VITA-165,10.78,novadata
+VV-VITA-166,5.74,novadata
+VV-VITA-168,7.56,novadata
+VV-VITA-170,4.58,novadata
+VV-VITA-171,12.75,novadata
+VV-VITA-172,5.94,novadata
+VV-VITA-173,5.37,novadata
+VV-VITA-174,6.95,novadata
+VV-VITA-181,4.92,novadata
+VV-VITA-183,8.67,novadata
+VV-VITA-186,7.04,novadata
+VV-VITA-188,5.71,novadata
+VV-VITA-189,5.56,novadata
+VV-VITA-190,6.45,novadata
+VV-VITA-192,7.46,novadata
+VV-VITA-197,8.41,novadata
+VV-VITA-198,7.09,novadata
+VV-VITA-198-V,13.15,novadata
+VV-VITA-199,5.34,novadata
+VV-VITA-200,5.35,novadata
+VV-VITA-202,2.73,novadata
+VV-VITA-203,5.77,novadata
+VV-VITA-204,5.14,novadata
+VV-VITA-206,5.11,novadata
+VV-VITA-207,5.74,novadata
+VV-VITA-208,7.62,novadata
+VV-VITA-215,6.05,novadata
+VV-VITA-216,5.58,novadata
+VV-VITA-217,5.72,novadata
+VV-VITA-222,6.31,novadata
+VV-VITA-222-V,10.52,novadata
+VV-VITA-223,8.9,novadata
+VV-VITA-224,6.31,novadata
+VV-VITA-225,7.63,novadata
+VV-VITA-225-V,13.37,novadata
+VV-VITA-226,5.32,novadata
+VV-VITA-227,6.7,novadata
+VV-VITA-228,7.58,novadata
+VV-VITA-230,8.72,novadata
+VV-VITA-231,7.1,novadata
+VV-VITA-236,8.0,novadata
+VV-VITA-237,4.49,novadata
+VV-VITA-243,6.37,novadata
+VV-VITA-247,7.29,novadata
+VV-VITA-248,6.15,novadata
+VV-VITA-248-V,11.8,novadata
+VV-VITA-249,6.25,novadata
+VV-VITA-250,5.14,novadata
+VV-VITA-252,8.05,novadata
+VV-VITA-253,7.11,novadata
+VV-VITA-256,8.05,novadata
+VV-VITA-257,8.65,novadata
+VV-VITA-258,4.93,novadata
+VV-VITA-259,8.32,novadata
+VV-VITA-262,8.25,novadata
+VV-VITA-264,2.88,novadata
+VV-VITA-265,7.22,novadata
+VV-VITA-266,5.99,novadata
+VV-VITA-267,4.86,novadata
+VV-VITA-274,5.2,novadata
+VV-VITA-276,5.09,novadata
+VV-VITA-277,3.48,novadata
+VV-VITA-284,7.42,novadata
+VV-VITA-286,5.56,novadata
+VV-VITA-287,6.92,novadata
+VV-VITA-292,5.16,novadata
+VV-VITA-293,3.04,novadata
+VV-VITA-294,4.7,novadata
+VV-VITA-295,5.83,novadata
+VV-VITA-297,7.17,novadata
+VV-VITA-298,6.29,novadata
+VV-VITA-299,6.99,novadata
+VV-VITA-301,3.88,novadata
+VV-VITA-303,5.44,novadata
+VV-VITA-304,4.31,novadata
+VV-VITA-306,5.3,novadata
+VV-VITA-307,3.71,novadata
+VV-VITA-308,7.26,novadata
+VV-VITA-31,5.53,novadata
+VV-VITA-310,2.11,novadata
+VV-VITA-311,5.77,novadata
+VV-VITA-312,5.78,novadata
+VV-VITA-313,5.26,novadata
+VV-VITA-314,3.25,novadata
+VV-VITA-315,4.89,novadata
+VV-VITA-316,5.97,novadata
+VV-VITA-317,6.54,novadata
+VV-VITA-318,4.77,novadata
+VV-VITA-319,6.02,novadata
+VV-VITA-320,6.42,novadata
+VV-VITA-320-V,11.4,novadata
+VV-VITA-322,4.23,novadata
+VV-VITA-323,4.63,novadata
+VV-VITA-324,6.6,novadata
+VV-VITA-325,5.87,novadata
+VV-VITA-326,6.57,novadata
+VV-VITA-327,7.08,novadata
+VV-VITA-328,6.05,novadata
+VV-VITA-329,5.74,novadata
+VV-VITA-330,3.8,novadata
+VV-VITA-331,6.22,novadata
+VV-VITA-332,3.87,novadata
+VV-VITA-333,5.13,novadata
+VV-VITA-335,5.59,novadata
+VV-VITA-336,5.07,novadata
+VV-VITA-337,7.84,novadata
+VV-VITA-338,7.01,novadata
+VV-VITA-339,6.97,novadata
+VV-VITA-340,5.89,novadata
+VV-VITA-341,5.27,novadata
+VV-VITA-342,6.62,novadata
+VV-VITA-343,8.73,novadata
+VV-VITA-344,7.41,novadata
+VV-VITA-345,8.39,novadata
+VV-VITA-346,2.96,novadata
+VV-VITA-347,4.2,novadata
+VV-VITA-348,8.52,novadata
+VV-VITA-349,4.32,novadata
+VV-VITA-350,4.27,novadata
+VV-VITA-351,5.34,novadata
+VV-VITA-352,7.36,novadata
+VV-VITA-353,3.28,novadata
+VV-VITA-354,7.52,novadata
+VV-VITA-355,8.43,novadata
+VV-VITA-355-V,16.16,novadata
+VV-VITA-356,5.29,novadata
+VV-VITA-357,3.92,novadata
+VV-VITA-358,7.92,novadata
+VV-VITA-359,5.49,novadata
+VV-VITA-360,4.23,novadata
+VV-VITA-361,5.38,novadata
+VV-VITA-362,6.51,novadata
+VV-VITA-363,5.02,novadata
+VV-VITA-363-V,9.64,novadata
+VV-VITA-364,7.98,novadata
+VV-VITA-365,3.38,novadata
+VV-VITA-366,3.71,novadata
+VV-VITA-367,5.7,novadata
+VV-VITA-368,5.7,novadata
+VV-VITA-369,5.27,novadata
+VV-VITA-370,4.0,novadata
+VV-VITA-370-V,6.85,novadata
+VV-VITA-371,4.81,novadata
+VV-VITA-372,5.0,novadata
+VV-VITA-373,3.82,novadata
+VV-VITA-374,5.36,novadata
+VV-VITA-375,4.86,novadata
+VV-VITA-376,4.8,novadata
+VV-VITA-377,4.1,novadata
+VV-VITA-378,3.84,novadata
+VV-VITA-379,5.14,novadata
+VV-VITA-38,3.23,novadata
+VV-VITA-380,2.84,novadata
+VV-VITA-381,3.59,novadata
+VV-VITA-382,5.08,novadata
+VV-VITA-383,5.17,novadata
+VV-VITA-384,3.65,novadata
+VV-VITA-385,6.32,novadata
+VV-VITA-386,9.2,novadata
+VV-VITA-387,11.01,novadata
+VV-VITA-388,1.67,novadata
+VV-VITA-389,9.81,novadata
+VV-VITA-39,4.97,novadata
+VV-VITA-390,10.32,novadata
+VV-VITA-391,7.24,novadata
+VV-VITA-392,4.39,novadata
+VV-VITA-393,7.28,novadata
+VV-VITA-394,7.07,novadata
+VV-VITA-395,6.27,novadata
+VV-VITA-396,2.0,novadata
+VV-VITA-397,16.83,novadata
+VV-VITA-398,3.35,novadata
+VV-VITA-399,6.91,novadata
+VV-VITA-400,5.0,novadata
+VV-VITA-401,4.82,novadata
+VV-VITA-402,6.93,novadata
+VV-VITA-403,6.22,novadata
+VV-VITA-404,6.53,novadata
+VV-VITA-405,3.85,novadata
+VV-VITA-406,4.73,novadata
+VV-VITA-407,8.83,novadata
+VV-VITA-408,7.05,novadata
+VV-VITA-409,4.11,novadata
+VV-VITA-410,7.56,novadata
+VV-VITA-411,5.91,novadata
+VV-VITA-412,5.97,novadata
+VV-VITA-413,9.28,novadata
+VV-VITA-414,8.11,novadata
+VV-VITA-415,6.59,novadata
+VV-VITA-417,0.78,novadata
+VV-VITA-422,7.34,novadata
+VV-VITA-423,7.34,novadata
+VV-VITA-46,6.23,novadata
+VV-VITA-49,6.73,novadata
+VV-VITA-49-V2,12.43,novadata
+VV-VITA-50,6.38,novadata
+VV-VITA-57,6.25,novadata
+VV-VITA-57-V,16.83,novadata
+VV-VITA-57-V2,8.77,novadata
+VV-VITA-63,4.22,novadata
+VV-VITA-86,7.4,novadata
+VV-VITA-88,8.08,novadata
+VV-VITA-90,6.32,novadata
+VV-VITA-93,3.85,novadata
+VV-VITA-94,9.5,novadata
+VV-VITA-98,4.45,novadata
+VV-VITA-99,6.83,novadata
+WT-66DZ-EI2B,4.21,novadata
