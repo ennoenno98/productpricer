@@ -116,13 +116,21 @@ the sidebar (default 0.83).
 | `data/fee_history/products_*.csv` | Amazon **FBA fee preview report** + COGS, one dated snapshot per version; the newest is the live dataset | **manual**: upload the report in the dashboard and click **💾 Save as new baseline** — it writes the dated snapshot and commits it to the repo via the GitHub API (set `GITHUB_TOKEN` on the server; optional `GITHUB_REPO`, `GITHUB_BRANCH`). Without a token it saves to local disk only (lost on redeploy) and you can download + commit manually |
 | `data/products.csv` | initial baseline (workbook sheet "AMZ Fees"), fallback when `fee_history/` is empty | `python extract_from_excel.py Margin_Check.xlsx` |
 | `data/marketing_spend.csv` | **Novadata daily margin export** (Amazon Ads spend ÷ units ordered, trailing 90 days, per SKU × marketplace) | **automatic**: daily GitHub Actions workflow `update_marketing_spend.yml` (07:00 UTC) commits the refresh; Render auto-deploys |
-| `data/metadata.json` | Ad-spend period (window + export dates) | written by the update workflow |
+| `data/cogs.csv` | **Novadata COGS** (current cost per SKU, EUR). Multipacks (`VMP_<base>_<n>_PK` = n × base) and bundles (`VV-BUN-a+b` = sum of parts) are derived, since Novadata doesn't track them | **automatic, weekly**: `update_cogs.yml` (Mondays 06:30 UTC) runs `update_cogs.py` and commits changes. The dashboard uses this table first and falls back to the COGS in the fee snapshot |
+| `data/metadata.json` | Ad-spend period, COGS update date and coverage | written by the update workflows |
 | `data/targets.json` | Country margin targets from the AP26 plan | `python extract_targets.py AP26_….xlsx` |
 
-**Update model:** ad spend and sales units refresh automatically every day
-from the same Novadata export the Margin-Analytics dashboard uses. The only
-manual update is the **FBA fee report** (which also carries prices); COGS and
-plan targets change rarely and have extract scripts.
+**Update model:** ad spend and sales units refresh automatically every day,
+and COGS every week, from Novadata. The only manual update is the **FBA fee
+report** (which also carries prices); plan targets change rarely and have
+extract scripts.
+
+**Weekly COGS setup (one-time):** in Novadata, create a data export that
+includes **SKU** and **COGS** columns and copy its download link. In GitHub →
+repository **Settings → Secrets and variables → Actions → New repository
+secret**, add it as `NOVADATA_COGS_EXPORT_URL`. Until that secret exists the
+workflow runs but leaves `data/cogs.csv` unchanged. To load COGS by hand:
+`python update_cogs.py --from-file <export.csv | worksheet.json>`.
 
 The ad-spend window and export date are stored in `data/metadata.json` and
 shown in the dashboard (sidebar "Data basis", CM3 column tooltips, captions).
