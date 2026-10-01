@@ -521,11 +521,36 @@ def load_brand_targets() -> dict:
 
 @st.cache_data(show_spinner=False)
 def load_fba_lut() -> pd.DataFrame:
-    """Form-factor x marketplace FBA fee lookup (median of catalog fees)."""
+    """Packaging x marketplace FBA fee lookup (long format: packaging,
+    marketplace, fba_fee, n_skus), built by build_fba_lut.py from the
+    product team's SKU -> packaging table (data/packaging.csv)."""
     try:
-        return pd.read_csv(DATA_DIR / "fba_form_factors.csv", index_col=0)
+        return pd.read_csv(DATA_DIR / "fba_packaging.csv")
     except Exception:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["packaging", "marketplace", "fba_fee", "n_skus"])
+
+
+REFERENCE_PACK = "Capsule bottle"
+
+
+def estimate_fba(lut: pd.DataFrame, packaging: str, marketplace: str) -> tuple[float, str]:
+    """FBA fee for a packaging type in a marketplace, plus what it is based on.
+
+    Uses the median of live products in that packaging when the marketplace has
+    any. Otherwise scales the capsule-bottle fee there by how this packaging
+    compares with capsule bottles in the marketplaces where both exist.
+    """
+    hit = lut[(lut["packaging"] == packaging) & (lut["marketplace"] == marketplace)]
+    if len(hit):
+        n = int(hit["n_skus"].iloc[0])
+        return float(hit["fba_fee"].iloc[0]), f"{n} product{'s' if n != 1 else ''}"
+    ref = lut[lut["packaging"] == REFERENCE_PACK].set_index("marketplace")["fba_fee"]
+    own = lut[lut["packaging"] == packaging].set_index("marketplace")["fba_fee"]
+    both = own.index.intersection(ref.index)
+    if marketplace in ref.index and len(both):
+        ratio = float((own[both] / ref[both]).median())
+        return round(float(ref[marketplace]) * ratio, 2), "estimate (no live product here)"
+    return float("nan"), "no reference"
 
 
 def required_price(cogs: float, fba: float, vat: float, ref_rate: float,
@@ -1600,19 +1625,28 @@ with tab_fees:
 # ===== Tab 4: New product (COGS input, FBA estimated, price to hit target) =====
 with tab_new:
     st.markdown(
-        "Price a product that isn't live yet. Enter its **COGS**, pick a "
-        "**form factor** (its Amazon FBA fee is estimated from comparable "
-        "products), choose the margin bar, and the tool solves the price you "
-        "need in each country."
+        "Price a product that isn't live yet. Enter its **COGS**, pick its "
+        "**packaging** (the Amazon FBA fee is taken from live products in the "
+        "same packaging), choose the margin bar, and the tool solves the price "
+        "you need in each country."
     )
     brands = load_brand_targets().get("brands", {})
     fba_lut = load_fba_lut()
-    forms = list(fba_lut.index) if not fba_lut.empty else ["— any (marketplace median)"]
+    _pack_n = (pd.read_csv(DATA_DIR / "packaging.csv")
+               .query("packaging != 'Unknown'")["packaging"].value_counts()
+               if (DATA_DIR / "packaging.csv").exists() else pd.Series(dtype=int))
+    forms = [p for p in _pack_n.index if p in set(fba_lut["packaging"])]
 
     c1, c2, c3 = st.columns(3)
     with c1:
         np_cogs = st.number_input("COGS (€ / unit)", 0.0, 500.0, 7.30, 0.10)
-        np_form = st.selectbox("Form factor (estimates FBA)", forms)
+        np_form = st.selectbox(
+            "Packaging (estimates FBA)", forms,
+            format_func=lambda p: f"{p}  ·  {_pack_n.get(p, 0)} live products",
+            help="FBA fee = median of live products in this packaging, per "
+                 "country. Packaging per SKU is maintained by the product team "
+                 "in data/packaging.csv.",
+        )
     with c2:
         np_ref = st.number_input("Referral fee (%)", 0.0, 45.0, 15.0, 0.5,
                                  help="Amazon referral fee. Supplements are a flat 15%.") / 100
@@ -1634,10 +1668,6 @@ with tab_new:
             help="A comparable product's price. If the required price is above "
                  "it, the product can't hit target at this COGS.",
         )
-        np_fba_adj = st.number_input(
-            "FBA adjustment (€)", -5.0, 10.0, 0.0, 0.1,
-            help="Nudge the estimated FBA fee up/down (e.g. a heavier pack).",
-        )
 
     # Which margin level and target value per country.
     if basis == "Brand plan" and np_brand in brands:
@@ -1648,22 +1678,16 @@ with tab_new:
         gp2_t = gp3_t = None  # per-country below
         bar_label = "Country plan (per-country CM2 / CM3)"
     st.caption(f"Target basis: **{bar_label}**. Referral {np_ref*100:.1f}%, "
-               f"COGS €{np_cogs:.2f}. FBA is estimated per country from “{np_form}”. "
+               f"COGS €{np_cogs:.2f}. FBA from live products in “{np_form}” packaging. "
                "All prices are **gross** (the VAT-inclusive sale price a customer pays).")
 
     rows = []
     gb_fx = eur_to_gbp
     for c in countries:
         vat_c = VAT_RATES.get(c, 0.20)
-        # FBA estimate: form-factor value, fall back to marketplace median.
-        fba = np.nan
-        if not fba_lut.empty and c in fba_lut.columns:
-            fba = fba_lut.loc[np_form, c] if np_form in fba_lut.index else np.nan
-            if pd.isna(fba) and "— any (marketplace median)" in fba_lut.index:
-                fba = fba_lut.loc["— any (marketplace median)", c]
+        fba, fba_basis = estimate_fba(fba_lut, np_form, c)
         if pd.isna(fba):
             continue
-        fba = float(fba) + np_fba_adj
         cur_c = "£" if c == "GB" else "€"
         # GB fees/prices are GBP; COGS is EUR -> convert to GBP for a GB listing.
         cogs_c = np_cogs * gb_fx if c == "GB" else np_cogs
@@ -1678,15 +1702,15 @@ with tab_new:
             verdict = "🟢 fits" if need <= anchor_c + 1e-6 else "🔴 too high"
         rows.append({
             "country": f"{COUNTRY_NAMES.get(c, c)} ({c})", "_c": c, "cur": cur_c,
-            "vat": vat_c * 100, "fba": fba,
+            "vat": vat_c * 100, "fba": fba, "fba_basis": fba_basis,
             "price_cm2": p_cm2, "price_cm3": p_cm3, "required": need,
             "anchor": anchor_c if np_anchor > 0 else np.nan, "verdict": verdict,
         })
     res = pd.DataFrame(rows)
     if res.empty:
-        st.info("No FBA reference available for this form factor.")
+        st.info("No FBA reference available for this packaging.")
     else:
-        show = res[["country", "vat", "fba", "price_cm2", "price_cm3",
+        show = res[["country", "vat", "fba", "fba_basis", "price_cm2", "price_cm3",
                     "required", "anchor", "verdict"]]
         st.dataframe(
             show, hide_index=True, width="stretch",
@@ -1694,7 +1718,10 @@ with tab_new:
                 "country": st.column_config.TextColumn("Country"),
                 "vat": st.column_config.NumberColumn("VAT %", format="%.1f"),
                 "fba": st.column_config.NumberColumn("FBA ≈", format="%.2f",
-                    help="Estimated fulfilment fee from comparable products"),
+                    help="Median FBA fee of live products in this packaging"),
+                "fba_basis": st.column_config.TextColumn("FBA based on",
+                    help="How many live products the fee comes from. 'estimate' = "
+                         "no live product in that country; scaled from capsule bottles."),
                 "price_cm2": st.column_config.NumberColumn("CM2/GP2 price (gross)", format="%.2f"),
                 "price_cm3": st.column_config.NumberColumn("CM3/GP3 price (gross)", format="%.2f"),
                 "required": st.column_config.NumberColumn("Required price (gross)", format="%.2f",

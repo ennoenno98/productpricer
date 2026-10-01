@@ -1,8 +1,12 @@
-"""Build data/fba_form_factors.csv: a form-factor x marketplace FBA fee lookup.
+"""Build data/fba_packaging.csv: estimated FBA fee per packaging type x marketplace.
 
-The New-product tab estimates a new SKU's Amazon fulfilment fee by borrowing
-the median fee of comparable live products (nearest-neighbour by form factor).
-Fees cluster tightly within a marketplace, so this lands within a few cents.
+The New-product tab estimates a new SKU's Amazon fulfilment fee from live
+products in the same packaging. Which SKU uses which packaging is maintained by
+the product team in data/packaging.csv (SKU -> packaging); the fee per
+packaging and marketplace is the median of those SKUs' current FBA fees.
+
+Output (long format): packaging, marketplace, fba_fee (median), n_skus.
+Multipack SKUs (VMP_<base>_<n>_PK) are excluded; their fees reflect the bundle.
 
 Usage:
     python build_fba_lut.py            # uses the newest data/fee_history snapshot
@@ -10,7 +14,6 @@ Usage:
 from __future__ import annotations
 
 import glob
-import re
 from pathlib import Path
 
 import pandas as pd
@@ -19,29 +22,24 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 FEE = "expected-domestic-fulfilment-fee-per-unit"
 
 
-def form_factor(name: str) -> str:
-    n = str(name).lower()
-    if re.search(r"gumm|gomm|gomin|soft bite|gums\b|gummibär", n):
-        return "Gummies (pouch)"
-    if re.search(r"\bpulver|powder|poudre|polvo|polvere|\btub\b", n):
-        return "Powder (tub)"
-    if re.search(r"\böl\b|\boil\b|olio|aceite|huile|softgel|perlas|perle", n):
-        return "Oil / softgel"
-    if re.search(r"kaps|caps|cáps|gél|capsule|comprim|tablet|tabletten|stück|stk", n):
-        return "Capsule / tablet bottle"
-    return "Other supplement"
-
-
 def main() -> None:
     snaps = sorted(glob.glob(str(DATA_DIR / "fee_history" / "products_*.csv")))
     path = snaps[-1] if snaps else str(DATA_DIR / "products.csv")
-    df = pd.read_csv(path)
-    df["form"] = df["product-name"].map(form_factor)
-    lut = df.groupby(["form", "amazon-store"])[FEE].median().round(2).unstack()
-    lut.loc["— any (marketplace median)"] = df.groupby("amazon-store")[FEE].median().round(2)
-    lut.to_csv(DATA_DIR / "fba_form_factors.csv")
-    print(f"fba_form_factors.csv from {Path(path).name}: "
-          f"{lut.shape[0]} form factors x {lut.shape[1]} marketplaces")
+    fees = pd.read_csv(path)
+    fees = fees[~fees["sku"].astype(str).str.match(r"^VMP_.+_\d+_PK$")]
+    pack = pd.read_csv(DATA_DIR / "packaging.csv")
+    pack = pack[pack["packaging"] != "Unknown"]
+    x = fees.merge(pack[["sku", "packaging"]], on="sku").dropna(subset=[FEE])
+    lut = (
+        x.groupby(["packaging", "amazon-store"])[FEE]
+        .agg(fba_fee="median", n_skus="count")
+        .reset_index()
+        .rename(columns={"amazon-store": "marketplace"})
+    )
+    lut["fba_fee"] = lut["fba_fee"].round(2)
+    lut.to_csv(DATA_DIR / "fba_packaging.csv", index=False)
+    print(f"fba_packaging.csv from {Path(path).name}: "
+          f"{lut['packaging'].nunique()} packaging types, {len(lut)} rows")
 
 
 if __name__ == "__main__":
