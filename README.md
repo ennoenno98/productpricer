@@ -61,15 +61,19 @@ Re-run after major assortment/price changes:
   country** (food-supplement rates), not a user input.
 - **Adjustable assumptions** (sidebar): EUR→GBP rate.
 - **New product tab** — price a SKU that isn't live yet. Enter its **COGS**,
-  pick a **form factor** (the Amazon **FBA fee is estimated** from comparable
-  live products, `data/fba_form_factors.csv`, editable), choose the margin bar
-  (**country plan** or **brand plan** from the AP26 `PnL per Brand`,
-  `data/brand_targets.json`), and the tool solves the **price required in each
-  country** to hit CM2/GP2 and CM3/GP3. Optional **anchor price** gives a
-  go/no-go verdict; a detail panel shows the margin waterfall, ad headroom and
-  break-even COGS at any test price. Referral is the flat 15%; VAT is fixed;
-  COGS is the input; only FBA carries (small) estimation uncertainty.
-  Regenerate the FBA lookup with `python build_fba_lut.py`.
+  pick its **packaging** (Capsule bottle, Gummies (Dose), Powder pouch
+  300 g / 500 g / 1 kg, Glass jar (Femme/Youth), Oil/softgel, Liquid,
+  Sticks/sachets). The Amazon **FBA fee is the median of live products in that
+  packaging**, per country, and the table shows how many products each fee is
+  based on. Where a packaging has no live product in a country, the fee is
+  estimated from how that packaging compares with capsule bottles elsewhere
+  (labelled "estimate"). Choose the margin bar (**brand plan** by default, or
+  **country plan**) and the tool solves the **gross price required in each
+  country**. Optional **anchor price** gives a go/no-go verdict; a detail panel
+  shows the margin waterfall, ad headroom and break-even COGS at any test price.
+  Which SKU uses which packaging is maintained by the product team in
+  `data/packaging.csv`; regenerate the fees with `python build_fba_lut.py`
+  (writes `data/fba_packaging.csv`) after a new FBA report or packaging change.
 - **FBA fee changes tab** — always compares the two newest fee report versions
   in `data/fee_history/` (dated snapshots; the versions being compared are
   named in the tab). When a report is uploaded in the sidebar, the comparison
