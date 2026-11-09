@@ -15,8 +15,8 @@
   },
   "cogs": {
     "source": "Novadata COGS (EUR), refreshed weekly by update_cogs.yml",
-    "updated": "2026-09-30",
-    "skus_from_novadata": 272,
+    "updated": "2026-11-09",
+    "skus_from_novadata": 273,
     "skus_derived": 105,
     "catalog_skus_without_cogs": [
       "T5-SR1L-UZBW"

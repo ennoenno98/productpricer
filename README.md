@@ -74,6 +74,12 @@ Re-run after major assortment/price changes:
   Which SKU uses which packaging is maintained by the product team in
   `data/packaging.csv`; regenerate the fees with `python build_fba_lut.py`
   (writes `data/fba_packaging.csv`) after a new FBA report or packaging change.
+  **Existing product — what-if update**: switch the tab to an existing SKU to
+  compare it *as it is today* with a possible update (new COGS and/or new
+  packaging). Its own FBA fee, referral rate, closing fee and ad spend per
+  country are used (no packaging averages), so the *today* margins match the
+  Product calculator exactly; the table shows CM2/CM3 % today vs after the
+  update at today's price, plus the price needed to hold target and the Δ.
 - **FBA fee changes tab** — always compares the two newest fee report versions
   in `data/fee_history/` (dated snapshots; the versions being compared are
   named in the tab). When a report is uploaded in the sidebar, the comparison
