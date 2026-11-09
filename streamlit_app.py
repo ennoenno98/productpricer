@@ -554,14 +554,15 @@ def estimate_fba(lut: pd.DataFrame, packaging: str, marketplace: str) -> tuple[f
 
 
 def required_price(cogs: float, fba: float, vat: float, ref_rate: float,
-                   target: float, ads_per_unit: float = 0.0) -> float:
+                   target: float, ads_per_unit: float = 0.0,
+                   closing: float = 0.0) -> float:
     """Gross price at which margin (net basis) hits `target`, fees scaling with price.
 
-    margin = net - cogs - fba - ref_rate*gross - ads;  net = gross/(1+vat).
+    margin = net - cogs - fba - closing - ref_rate*gross - ads;  net = gross/(1+vat).
     Solving margin/net = target for gross. Returns nan if the denominator is
     non-positive (target unreachable at any price).
     """
-    fixed = cogs + fba + ads_per_unit
+    fixed = cogs + fba + ads_per_unit + closing
     denom = (1 - target) / (1 + vat) - ref_rate
     return fixed / denom if denom > 0 else float("nan")
 
@@ -1624,12 +1625,30 @@ with tab_fees:
 
 # ===== Tab 4: New product (COGS input, FBA estimated, price to hit target) =====
 with tab_new:
-    st.markdown(
-        "Price a product that isn't live yet. Enter its **COGS**, pick its "
-        "**packaging** (the Amazon FBA fee is taken from live products in the "
-        "same packaging), choose the margin bar, and the tool solves the price "
-        "you need in each country."
+    np_mode = st.radio(
+        "What are you pricing?",
+        ["New product (not live yet)", "Existing product — what-if update"],
+        horizontal=True, key="np_mode",
+        help="Existing product: compare a live product as it is today with a "
+             "possible update (new COGS and/or packaging) using its own Amazon "
+             "fees, referral rate and ad spend per country — no packaging averages.",
     )
+    is_update = np_mode.startswith("Existing")
+    if is_update:
+        st.markdown(
+            "Compare a live product **as it is today** with a **possible update** "
+            "(new COGS, new packaging). FBA fee, referral rate, closing fee and ad "
+            "spend are the product's **own values per country**, so the *today* "
+            "margins match the Product calculator exactly — only what you change "
+            "changes."
+        )
+    else:
+        st.markdown(
+            "Price a product that isn't live yet. Enter its **COGS**, pick its "
+            "**packaging** (the Amazon FBA fee is taken from live products in the "
+            "same packaging), choose the margin bar, and the tool solves the price "
+            "you need in each country."
+        )
     brands = load_brand_targets().get("brands", {})
     fba_lut = load_fba_lut()
     _pack_n = (pd.read_csv(DATA_DIR / "packaging.csv")
@@ -1637,19 +1656,56 @@ with tab_new:
                if (DATA_DIR / "packaging.csv").exists() else pd.Series(dtype=int))
     forms = [p for p in _pack_n.index if p in set(fba_lut["packaging"])]
 
+    live = None
+    np_sku = ""
+    cogs_now = 0.0
+    if is_update:
+        _all = localize_costs(data, eur_to_gbp)
+        _opts = (_all.drop_duplicates("sku")
+                 .assign(lbl=lambda d: d["sku"] + " — " + d["product_name"].str.slice(0, 90)))
+        np_pick = st.selectbox("Existing product", _opts["lbl"].tolist(), key="np_sku")
+        np_sku = np_pick.split(" — ")[0]
+        live = (_all[_all["sku"] == np_sku].drop_duplicates("country")
+                .set_index("country"))
+        _cn = live["cogs_eur"].dropna()
+        cogs_now = float(_cn.iloc[0]) if len(_cn) else 0.0
+
     c1, c2, c3 = st.columns(3)
     with c1:
-        np_cogs = st.number_input("COGS (€ / unit)", 0.0, 500.0, 7.30, 0.10)
-        np_form = st.selectbox(
-            "Packaging (estimates FBA)", forms,
-            format_func=lambda p: f"{p}  ·  {_pack_n.get(p, 0)} live products",
-            help="FBA fee = median of live products in this packaging, per "
-                 "country. Packaging per SKU is maintained by the product team "
-                 "in data/packaging.csv.",
-        )
+        if is_update:
+            np_cogs = st.number_input(
+                "COGS after update (€ / unit)", 0.0, 500.0, round(cogs_now, 2), 0.10,
+                key=f"np_cogs_upd_{np_sku}",
+                help=f"Today's COGS: €{cogs_now:.2f} (Novadata). Enter the cost "
+                     "after the update — or leave it to compare packaging only.",
+            )
+            np_new_pack = st.checkbox(
+                "Packaging changes", value=False, key="np_new_pack",
+                help="Off: keep this product's actual FBA fees per country. On: "
+                     "estimate FBA from live products in the new packaging.",
+            )
+            np_form = st.selectbox(
+                "New packaging (estimates FBA)", forms, key="np_form_upd",
+                format_func=lambda p: f"{p}  ·  {_pack_n.get(p, 0)} live products",
+                disabled=not np_new_pack,
+            )
+        else:
+            np_new_pack = True
+            np_cogs = st.number_input("COGS (€ / unit)", 0.0, 500.0, 7.30, 0.10)
+            np_form = st.selectbox(
+                "Packaging (estimates FBA)", forms,
+                format_func=lambda p: f"{p}  ·  {_pack_n.get(p, 0)} live products",
+                help="FBA fee = median of live products in this packaging, per "
+                     "country. Packaging per SKU is maintained by the product team "
+                     "in data/packaging.csv.",
+            )
     with c2:
-        np_ref = st.number_input("Referral fee (%)", 0.0, 45.0, 15.0, 0.5,
-                                 help="Amazon referral fee. Supplements are a flat 15%.") / 100
+        np_ref = st.number_input(
+            "Referral fee (%)", 0.0, 45.0, 15.0, 0.5, disabled=is_update,
+            help=("Existing product: the product's actual referral rate per "
+                  "country is used instead." if is_update else
+                  "Amazon referral fee. Supplements are a flat 15%."),
+        ) / 100
         basis = st.radio(
             "Hold to",
             ["Brand plan", "Country plan"],
@@ -1677,15 +1733,45 @@ with tab_new:
     else:
         gp2_t = gp3_t = None  # per-country below
         bar_label = "Country plan (per-country CM2 / CM3)"
-    st.caption(f"Target basis: **{bar_label}**. Referral {np_ref*100:.1f}%, "
-               f"COGS €{np_cogs:.2f}. FBA from live products in “{np_form}” packaging. "
-               "All prices are **gross** (the VAT-inclusive sale price a customer pays).")
+    if is_update:
+        _what = (f"FBA from live products in “{np_form}” packaging; referral rate, "
+                 "closing fee and ad spend are this product's own. "
+                 if np_new_pack else
+                 "FBA, referral rate, closing fee and ad spend are this product's "
+                 "own, per country. ")
+        st.caption(f"Target basis: **{bar_label}**. **{np_sku}**: COGS €{cogs_now:.2f} "
+                   f"today → **€{np_cogs:.2f}** after update ({np_cogs - cogs_now:+.2f}). "
+                   + _what +
+                   "All prices are **gross** (the VAT-inclusive sale price a customer pays).")
+    else:
+        st.caption(f"Target basis: **{bar_label}**. Referral {np_ref*100:.1f}%, "
+                   f"COGS €{np_cogs:.2f}. FBA from live products in “{np_form}” packaging. "
+                   "All prices are **gross** (the VAT-inclusive sale price a customer pays).")
 
     rows = []
     gb_fx = eur_to_gbp
     for c in countries:
         vat_c = VAT_RATES.get(c, 0.20)
-        fba, fba_basis = estimate_fba(fba_lut, np_form, c)
+        # Defaults for a product that isn't live: flat referral, no closing fee,
+        # no ad spend yet. An existing product brings its own values per country.
+        ref_c, closing_c, ads_c = np_ref, 0.0, 0.0
+        price_now = fba_now = cogs_now_c = np.nan
+        if is_update:
+            if c not in live.index:
+                continue
+            lr = live.loc[c]
+            price_now = float(lr["current_price"])
+            fba_now = float(lr["fba_fee"]) if pd.notna(lr["fba_fee"]) else np.nan
+            cogs_now_c = float(lr["cogs"]) if pd.notna(lr["cogs"]) else np.nan
+            if pd.notna(lr.get("referral_rate")):
+                ref_c = float(lr["referral_rate"])
+            closing_c = float(lr["closing_fee"]) if pd.notna(lr.get("closing_fee")) else 0.0
+            ads_c = (float(lr["marketing_per_unit"])
+                     if pd.notna(lr.get("marketing_per_unit")) else 0.0)
+        if np_new_pack:
+            fba, fba_basis = estimate_fba(fba_lut, np_form, c)
+        else:
+            fba, fba_basis = fba_now, "this product's fee"
         if pd.isna(fba):
             continue
         cur_c = "£" if c == "GB" else "€"
@@ -1693,22 +1779,78 @@ with tab_new:
         cogs_c = np_cogs * gb_fx if c == "GB" else np_cogs
         cc2, cc3 = (country_targets(c, plan_month) if basis == "Country plan"
                     else (gp2_t, gp3_t))
-        p_cm2 = required_price(cogs_c, fba, vat_c, np_ref, cc2)
-        p_cm3 = required_price(cogs_c, fba, vat_c, np_ref, cc3)
+        p_cm2 = required_price(cogs_c, fba, vat_c, ref_c, cc2, closing=closing_c)
+        p_cm3 = required_price(cogs_c, fba, vat_c, ref_c, cc3,
+                               ads_per_unit=ads_c, closing=closing_c)
         need = max(p_cm2, p_cm3)
         anchor_c = (np_anchor * gb_fx if c == "GB" else np_anchor) if np_anchor > 0 else np.nan
         verdict = ""
         if np_anchor > 0 and np.isfinite(need):
             verdict = "🟢 fits" if need <= anchor_c + 1e-6 else "🔴 too high"
+        # Existing product: margins at today's price, as-is vs after the update
+        # (same formula as the Product calculator: referral x gross + closing).
+        cm2_now = cm3_now = cm2_upd = cm3_upd = np.nan
+        if is_update and price_now > 0:
+            net_now = price_now / (1 + vat_c)
+            fees_now = ref_c * price_now + closing_c
+            if pd.notna(cogs_now_c) and pd.notna(fba_now):
+                cm2_now = (net_now - cogs_now_c - fba_now - fees_now) / net_now
+                cm3_now = cm2_now - ads_c / net_now
+            cm2_upd = (net_now - cogs_c - fba - fees_now) / net_now
+            cm3_upd = cm2_upd - ads_c / net_now
         rows.append({
             "country": f"{COUNTRY_NAMES.get(c, c)} ({c})", "_c": c, "cur": cur_c,
             "vat": vat_c * 100, "fba": fba, "fba_basis": fba_basis,
+            "ref": ref_c, "closing": closing_c, "ads": ads_c,
             "price_cm2": p_cm2, "price_cm3": p_cm3, "required": need,
+            "price_now": price_now,
+            "delta_price": need - price_now if is_update else np.nan,
+            "cm2_now": cm2_now * 100, "cm3_now": cm3_now * 100,
+            "cm2_upd": cm2_upd * 100, "cm3_upd": cm3_upd * 100,
             "anchor": anchor_c if np_anchor > 0 else np.nan, "verdict": verdict,
         })
     res = pd.DataFrame(rows)
     if res.empty:
-        st.info("No FBA reference available for this packaging.")
+        st.info("No live listing of this product." if is_update
+                else "No FBA reference available for this packaging.")
+    elif is_update:
+        cols = ["country", "price_now", "cm2_now", "cm2_upd", "cm3_now", "cm3_upd",
+                "required", "delta_price", "fba", "fba_basis"]
+        if np_anchor > 0:
+            cols += ["anchor", "verdict"]
+        st.dataframe(
+            res[cols], hide_index=True, width="stretch",
+            column_config={
+                "country": st.column_config.TextColumn("Country"),
+                "price_now": st.column_config.NumberColumn("Price today (gross)", format="%.2f"),
+                "cm2_now": st.column_config.NumberColumn("CM2 % today", format="%.1f",
+                    help="As in the Product calculator: today's price, COGS and fees"),
+                "cm2_upd": st.column_config.NumberColumn("CM2 % after update", format="%.1f",
+                    help="At today's price with the updated COGS / packaging"),
+                "cm3_now": st.column_config.NumberColumn("CM3 % today", format="%.1f",
+                    help="After this product's actual ad spend per unit"),
+                "cm3_upd": st.column_config.NumberColumn("CM3 % after update", format="%.1f",
+                    help="At today's price with the updated COGS / packaging, "
+                         "same ad spend per unit"),
+                "required": st.column_config.NumberColumn("Price to hold target (gross)",
+                    format="%.2f",
+                    help="Gross price after the update that meets both targets "
+                         "(CM3 incl. this product's actual ad spend)"),
+                "delta_price": st.column_config.NumberColumn("Δ vs today", format="%+.2f",
+                    help="Price to hold target minus today's price"),
+                "fba": st.column_config.NumberColumn("FBA", format="%.2f"),
+                "fba_basis": st.column_config.TextColumn("FBA based on"),
+                "anchor": st.column_config.NumberColumn("Anchor", format="%.2f"),
+                "verdict": st.column_config.TextColumn("vs anchor"),
+            },
+        )
+        st.caption(
+            "*Today* columns use the product's current COGS, FBA, referral rate, "
+            "closing fee and ad spend per country — identical to the Product "
+            "calculator. *After update* re-prices the same listing with your COGS "
+            "and packaging; the referral fee re-scales with price when solving the "
+            f"price to hold target. GB in £ with COGS converted at {gb_fx:.2f}."
+        )
     else:
         show = res[["country", "vat", "fba", "fba_basis", "price_cm2", "price_cm3",
                     "required", "anchor", "verdict"]]
@@ -1746,20 +1888,25 @@ with tab_new:
         drow = res[res["_c"] == det_c].iloc[0]
         cur_d = drow["cur"]
         with d2:
-            default_p = float(drow["required"]) if np.isfinite(drow["required"]) else 20.0
+            if is_update and np.isfinite(drow["price_now"]) and drow["price_now"] > 0:
+                default_p = float(drow["price_now"])
+            else:
+                default_p = float(drow["required"]) if np.isfinite(drow["required"]) else 20.0
             det_price = st.number_input(
-                f"Gross price to test ({cur_d})", 0.0, 500.0, round(default_p, 2), 0.1)
+                f"Gross price to test ({cur_d})", 0.01, 500.0, round(default_p, 2), 0.1)
         vat_d = drow["vat"] / 100
         fba_d = drow["fba"]
+        ref_d, closing_d, ads_d = float(drow["ref"]), float(drow["closing"]), float(drow["ads"])
         cogs_d = np_cogs * gb_fx if det_c == "GB" else np_cogs
         cc2, cc3 = (country_targets(det_c, plan_month) if basis == "Country plan"
                     else (gp2_t, gp3_t))
         cm1_t = load_targets()["cm1_target"].get(det_c, 0.71) if basis == "Country plan" \
             else brands.get(np_brand, {}).get("gp1", 0.71)
         net = det_price / (1 + vat_d)
-        referral = det_price * np_ref
+        referral = det_price * ref_d + closing_d
         cm1 = net - cogs_d
         cm2 = cm1 - fba_d - referral
+        cm3 = cm2 - ads_d
         ads_head = cm2 - cc3 * net
         m = st.columns(4)
         m[0].metric("Net", f"{cur_d}{net:.2f}")
@@ -1767,9 +1914,15 @@ with tab_new:
                     delta=f"{(cm1/net - cm1_t)*100:+.1f}pp vs {cm1_t*100:.0f}%")
         m[2].metric("CM2 / GP2", f"{cm2/net*100:.1f}%",
                     delta=f"{(cm2/net - cc2)*100:+.1f}pp vs {cc2*100:.1f}%")
-        m[3].metric("Ad headroom to CM3/GP3", f"{cur_d}{max(ads_head,0):.2f}",
-                    help=f"Per unit for ads + discounts before CM3/GP3 target "
-                         f"{cc3*100:.1f}% is breached ({max(ads_head/net,0)*100:.1f}% of net)")
+        if is_update:
+            m[3].metric("CM3 / GP3", f"{cm3/net*100:.1f}%",
+                        delta=f"{(cm3/net - cc3)*100:+.1f}pp vs {cc3*100:.1f}%",
+                        help=f"After this product's actual ad spend of "
+                             f"{cur_d}{ads_d:.2f} per unit")
+        else:
+            m[3].metric("Ad headroom to CM3/GP3", f"{cur_d}{max(ads_head,0):.2f}",
+                        help=f"Per unit for ads + discounts before CM3/GP3 target "
+                             f"{cc3*100:.1f}% is breached ({max(ads_head/net,0)*100:.1f}% of net)")
         breakeven_cogs = net * (1 - cc2) - fba_d - referral
         be_txt = (f"{cur_d}{breakeven_cogs:.2f}" if np.isfinite(breakeven_cogs) else "—")
         cogs_shown = cogs_d
