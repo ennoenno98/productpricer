@@ -1841,13 +1841,16 @@ with tab_new:
             verdict = "🟢 fits" if need <= anchor_c + 1e-6 else "🔴 too high"
         # Existing product: margins at today's price, as-is vs after the update
         # (same formula as the Product calculator: referral x gross + closing).
-        cm2_now = cm3_now = cm2_upd = cm3_upd = np.nan
+        cm1_now = cm2_now = cm3_now = cm1_upd = cm2_upd = cm3_upd = np.nan
         if is_update and price_now > 0:
             net_now = price_now / (1 + vat_c)
             fees_now = ref_c * price_now + closing_c
+            if pd.notna(cogs_now_c):
+                cm1_now = (net_now - cogs_now_c) / net_now
             if pd.notna(cogs_now_c) and pd.notna(fba_now):
                 cm2_now = (net_now - cogs_now_c - fba_now - fees_now) / net_now
                 cm3_now = cm2_now - ads_c / net_now
+            cm1_upd = (net_now - cogs_c) / net_now
             cm2_upd = (net_now - cogs_c - fba - fees_now) / net_now
             cm3_upd = cm2_upd - ads_c / net_now
         rows.append({
@@ -1857,6 +1860,7 @@ with tab_new:
             "price_cm2": p_cm2, "price_cm3": p_cm3, "required": need,
             "price_now": price_now,
             "delta_price": need - price_now if is_update else np.nan,
+            "cm1_now": cm1_now * 100, "cm1_upd": cm1_upd * 100,
             "cm2_now": cm2_now * 100, "cm3_now": cm3_now * 100,
             "cm2_upd": cm2_upd * 100, "cm3_upd": cm3_upd * 100,
             "anchor": anchor_c if np_anchor > 0 else np.nan, "verdict": verdict,
@@ -1866,7 +1870,7 @@ with tab_new:
         st.info("No live listing of this product." if is_update
                 else "No FBA reference available for this packaging.")
     elif is_update:
-        cols = ["country", "price_now", "cm2_now", "cm2_upd", "cm3_now", "cm3_upd",
+        cols = ["country", "price_now", "cm1_now", "cm1_upd", "cm2_now", "cm2_upd", "cm3_now", "cm3_upd",
                 "required", "delta_price", "fba", "fba_basis"]
         if np_anchor > 0:
             cols += ["anchor", "verdict"]
@@ -1875,6 +1879,10 @@ with tab_new:
             column_config={
                 "country": st.column_config.TextColumn("Country"),
                 "price_now": st.column_config.NumberColumn("Price today (gross)", format="%.2f"),
+                "cm1_now": st.column_config.NumberColumn("CM1 % today", format="%.1f",
+                    help="Net price minus COGS, at today's price"),
+                "cm1_upd": st.column_config.NumberColumn("CM1 % after update", format="%.1f",
+                    help="At today's price with the updated COGS"),
                 "cm2_now": st.column_config.NumberColumn("CM2 % today", format="%.1f",
                     help="As in the Product calculator: today's price, COGS and fees"),
                 "cm2_upd": st.column_config.NumberColumn("CM2 % after update", format="%.1f",
