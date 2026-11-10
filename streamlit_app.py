@@ -553,6 +553,26 @@ def estimate_fba(lut: pd.DataFrame, packaging: str, marketplace: str) -> tuple[f
     return float("nan"), "no reference"
 
 
+def fba_from_sku(sku_fees: pd.Series, lut: pd.DataFrame, sku: str,
+                 marketplace: str) -> tuple[float, str]:
+    """(FBA fee, basis label) taken from one live SKU instead of a packaging median.
+
+    `sku_fees` is that SKU's fee per marketplace. Where the SKU isn't listed,
+    the capsule-bottle fee there is scaled by how the SKU compares with capsule
+    bottles in the marketplaces where it is listed.
+    """
+    own = sku_fees.dropna()
+    if marketplace in own.index:
+        return float(own[marketplace]), f"{sku} fee"
+    ref = lut[lut["packaging"] == REFERENCE_PACK].set_index("marketplace")["fba_fee"]
+    both = own.index.intersection(ref.index)
+    if marketplace in ref.index and len(both):
+        ratio = float((own[both] / ref[both]).median())
+        return (round(float(ref[marketplace]) * ratio, 2),
+                f"estimate ({sku} not listed here)")
+    return float("nan"), "no reference"
+
+
 def required_price(cogs: float, fba: float, vat: float, ref_rate: float,
                    target: float, ads_per_unit: float = 0.0,
                    closing: float = 0.0) -> float:
@@ -1644,10 +1664,10 @@ with tab_new:
         )
     else:
         st.markdown(
-            "Price a product that isn't live yet. Enter its **COGS**, pick its "
-            "**packaging** (the Amazon FBA fee is taken from live products in the "
-            "same packaging), choose the margin bar, and the tool solves the price "
-            "you need in each country."
+            "Price a product that isn't live yet. Enter its **COGS** and choose "
+            "where the Amazon FBA fee comes from — the **average of a packaging "
+            "category** or the actual fees of **one live SKU** you pick. Choose "
+            "the margin bar, and the tool solves the price you need in each country."
         )
     brands = load_brand_targets().get("brands", {})
     fba_lut = load_fba_lut()
@@ -1655,6 +1675,42 @@ with tab_new:
                .query("packaging != 'Unknown'")["packaging"].value_counts()
                if (DATA_DIR / "packaging.csv").exists() else pd.Series(dtype=int))
     forms = [p for p in _pack_n.index if p in set(fba_lut["packaging"])]
+
+    _pack_of = (pd.read_csv(DATA_DIR / "packaging.csv").set_index("sku")["packaging"].to_dict()
+                if (DATA_DIR / "packaging.csv").exists() else {})
+    _sku_names = data.drop_duplicates("sku").set_index("sku")["product_name"]
+    _has_fee = set(data.dropna(subset=["fba_fee"])["sku"])
+    _fba_skus = [k for k in _sku_names.index if k in _has_fee]
+
+    def _fba_source(suffix: str, disabled: bool = False) -> tuple[bool, str, str]:
+        """Packaging-average vs one-live-SKU picker -> (use_sku, packaging, sku)."""
+        src = st.radio(
+            "FBA fee from", ["Packaging average", "A specific SKU"],
+            horizontal=True, key=f"np_fba_src_{suffix}", disabled=disabled,
+            help="Packaging average = median FBA fee of all live products in "
+                 "that packaging. A specific SKU = use the actual FBA fees of "
+                 "one live product you pick (e.g. the closest existing product).",
+        )
+        if src == "A specific SKU":
+            ref = st.selectbox(
+                "Take FBA fees from", _fba_skus, key=f"np_fba_sku_{suffix}",
+                disabled=disabled,
+                format_func=lambda s: (
+                    f"{s} — {str(_sku_names.get(s, ''))[:70]}"
+                    + (f"  ·  {_pack_of[s]}" if _pack_of.get(s, "Unknown") != "Unknown" else "")
+                ),
+                help="This product's own FBA fee is used in every country where "
+                     "it is listed; elsewhere it is estimated.",
+            )
+            return True, "", ref
+        form = st.selectbox(
+            "Packaging", forms, key=f"np_form_{suffix}", disabled=disabled,
+            format_func=lambda p: f"{p}  ·  {_pack_n.get(p, 0)} live products",
+            help="FBA fee = median of live products in this packaging, per "
+                 "country. Packaging per SKU is maintained by the product team "
+                 "in data/packaging.csv.",
+        )
+        return False, form, ""
 
     live = None
     np_sku = ""
@@ -1682,23 +1738,17 @@ with tab_new:
             np_new_pack = st.checkbox(
                 "Packaging changes", value=False, key="np_new_pack",
                 help="Off: keep this product's actual FBA fees per country. On: "
-                     "estimate FBA from live products in the new packaging.",
+                     "take FBA from a packaging average or from another live SKU.",
             )
-            np_form = st.selectbox(
-                "New packaging (estimates FBA)", forms, key="np_form_upd",
-                format_func=lambda p: f"{p}  ·  {_pack_n.get(p, 0)} live products",
-                disabled=not np_new_pack,
-            )
+            np_use_sku, np_form, np_fba_sku = _fba_source("upd", disabled=not np_new_pack)
         else:
             np_new_pack = True
             np_cogs = st.number_input("COGS (€ / unit)", 0.0, 500.0, 7.30, 0.10)
-            np_form = st.selectbox(
-                "Packaging (estimates FBA)", forms,
-                format_func=lambda p: f"{p}  ·  {_pack_n.get(p, 0)} live products",
-                help="FBA fee = median of live products in this packaging, per "
-                     "country. Packaging per SKU is maintained by the product team "
-                     "in data/packaging.csv.",
-            )
+            np_use_sku, np_form, np_fba_sku = _fba_source("new")
+    _ref_fees = (data[data["sku"] == np_fba_sku].drop_duplicates("country")
+                 .set_index("country")["fba_fee"] if np_use_sku else None)
+    fba_txt = (f"FBA fees taken from live SKU **{np_fba_sku}**" if np_use_sku
+               else f"FBA from live products in “{np_form}” packaging")
     with c2:
         np_ref = st.number_input(
             "Referral fee (%)", 0.0, 45.0, 15.0, 0.5, disabled=is_update,
@@ -1734,7 +1784,7 @@ with tab_new:
         gp2_t = gp3_t = None  # per-country below
         bar_label = "Country plan (per-country CM2 / CM3)"
     if is_update:
-        _what = (f"FBA from live products in “{np_form}” packaging; referral rate, "
+        _what = (f"{fba_txt}; referral rate, "
                  "closing fee and ad spend are this product's own. "
                  if np_new_pack else
                  "FBA, referral rate, closing fee and ad spend are this product's "
@@ -1745,7 +1795,7 @@ with tab_new:
                    "All prices are **gross** (the VAT-inclusive sale price a customer pays).")
     else:
         st.caption(f"Target basis: **{bar_label}**. Referral {np_ref*100:.1f}%, "
-                   f"COGS €{np_cogs:.2f}. FBA from live products in “{np_form}” packaging. "
+                   f"COGS €{np_cogs:.2f}. {fba_txt}. "
                    "All prices are **gross** (the VAT-inclusive sale price a customer pays).")
 
     rows = []
@@ -1768,7 +1818,9 @@ with tab_new:
             closing_c = float(lr["closing_fee"]) if pd.notna(lr.get("closing_fee")) else 0.0
             ads_c = (float(lr["marketing_per_unit"])
                      if pd.notna(lr.get("marketing_per_unit")) else 0.0)
-        if np_new_pack:
+        if np_new_pack and np_use_sku:
+            fba, fba_basis = fba_from_sku(_ref_fees, fba_lut, np_fba_sku, c)
+        elif np_new_pack:
             fba, fba_basis = estimate_fba(fba_lut, np_form, c)
         else:
             fba, fba_basis = fba_now, "this product's fee"
@@ -1860,10 +1912,12 @@ with tab_new:
                 "country": st.column_config.TextColumn("Country"),
                 "vat": st.column_config.NumberColumn("VAT %", format="%.1f"),
                 "fba": st.column_config.NumberColumn("FBA ≈", format="%.2f",
-                    help="Median FBA fee of live products in this packaging"),
+                    help="Median FBA fee of live products in this packaging, or "
+                         "the chosen SKU's own fee"),
                 "fba_basis": st.column_config.TextColumn("FBA based on",
-                    help="How many live products the fee comes from. 'estimate' = "
-                         "no live product in that country; scaled from capsule bottles."),
+                    help="How many live products the fee comes from, or the SKU it "
+                         "was taken from. 'estimate' = nothing live in that country; "
+                         "scaled from capsule bottles."),
                 "price_cm2": st.column_config.NumberColumn("CM2/GP2 price (gross)", format="%.2f"),
                 "price_cm3": st.column_config.NumberColumn("CM3/GP3 price (gross)", format="%.2f"),
                 "required": st.column_config.NumberColumn("Required price (gross)", format="%.2f",
