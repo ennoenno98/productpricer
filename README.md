@@ -71,6 +71,10 @@ Re-run after major assortment/price changes:
   **country plan**) and the tool solves the **gross price required in each
   country**. Optional **anchor price** gives a go/no-go verdict; a detail panel
   shows the margin waterfall, ad headroom and break-even COGS at any test price.
+  **FBA fee from: Packaging average / A specific SKU** — instead of the
+  packaging median you can take the actual FBA fees of one live SKU (e.g. the
+  closest existing product); where that SKU isn't listed in a country, the fee
+  is estimated and labelled as such.
   Which SKU uses which packaging is maintained by the product team in
   `data/packaging.csv`; regenerate the fees with `python build_fba_lut.py`
   (writes `data/fba_packaging.csv`) after a new FBA report or packaging change.
